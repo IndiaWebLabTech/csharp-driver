@@ -32,10 +32,17 @@ namespace Cassandra.Mapping.Statements
         public async Task<Statement> GetStatementAsync(ISession session, Cql cql, bool? forceNoPrepare = null)
         {
             var noPrepare = forceNoPrepare ?? cql.QueryOptions.NoPrepare;
+            var cqlquery = cql.Statement;
+            if (cqlquery.ToLower().Contains("@db"))
+            { 
+                var db = (MappingConfiguration.Global.OnKeySpaceRequested != null ? $"{MappingConfiguration.Global.OnKeySpaceRequested?.Invoke()}." : "") ;
+                cqlquery = cqlquery.Replace("@db.", (string.IsNullOrWhiteSpace(db) ? "" : db));
+            }
             if (noPrepare)
             {
                 // Use a SimpleStatement if we're not supposed to prepare
-                var statement = new SimpleStatement(cql.Statement, cql.Arguments);
+                //var statement = new SimpleStatement(cql.Statement, cql.Arguments);
+                var statement = new SimpleStatement(cqlquery, cql.Arguments);
                 SetStatementProperties(statement, cql);
                 return statement;
             }

@@ -17,6 +17,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Cassandra.Mapping;
 using Cassandra.Requests;
 using Cassandra.Serialization;
 
@@ -86,7 +87,11 @@ namespace Cassandra
         /// </remarks>
         public override string Keyspace
         {
-            get { return _keyspace; }
+            get
+            {
+                var db = string.IsNullOrWhiteSpace(_keyspace) ? (MappingConfiguration.Global.OnKeySpaceRequested != null ? $"{MappingConfiguration.Global.OnKeySpaceRequested?.Invoke()}" : "") : _keyspace;
+                return db;
+            }
         }
 
         /// <summary>
@@ -102,6 +107,10 @@ namespace Cassandra
         /// <param name="query">The cql query string.</param>
         public SimpleStatement(string query)
         {
+            if (query.ToLower().Contains("@db"))
+            {
+                query = query.Replace("@db.", (string.IsNullOrWhiteSpace(this.Keyspace) ? "" : this.Keyspace + "."));
+            }
             _query = query;
         }
 
@@ -166,6 +175,10 @@ namespace Cassandra
             //The order of the keys and values is unspecified, but is guaranteed to be both in the same order.
             SetParameterNames(valuesDictionary.Keys);
             base.SetValues(valuesDictionary.Values.ToArray());
+            if (query.ToLower().Contains("@db"))
+            {
+                query = query.Replace("@db.", (string.IsNullOrWhiteSpace(this.Keyspace) ? "" : this.Keyspace + "."));
+            }
             _query = query;
         }
 

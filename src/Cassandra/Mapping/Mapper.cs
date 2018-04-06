@@ -20,42 +20,39 @@ namespace Cassandra.Mapping
         private readonly StatementFactory _statementFactory;
         private readonly CqlGenerator _cqlGenerator;
         private readonly int _queryAbortTimeout = 3000;
+        private readonly string _keyspace=string.Empty;
 
         /// <summary>
         /// Creates a new instance of the mapper using the configuration provided
         /// </summary>
         /// <param name="session">Session to be used to execute the statements</param>
         /// <param name="config">Mapping definitions for the POCOs</param>
-        public Mapper(ISession session, MappingConfiguration config) 
+        /// <param name="keyspace">KeyspaceName</param>
+        public Mapper(ISession session, MappingConfiguration config,string keyspace=null) 
             : this(session, config.MapperFactory, config.StatementFactory, new CqlGenerator(config.MapperFactory.PocoDataFactory))
         {
-
+            _keyspace = keyspace;
         }
 
         /// <summary>
         /// Creates a new instance of the mapper using <see cref="MappingConfiguration.Global"/> mapping definitions.
         /// </summary>
-        public Mapper(ISession session) : this(session, MappingConfiguration.Global)
+        public Mapper(ISession session, string keyspace = null) : this(session, MappingConfiguration.Global)
         {
-            
+            _keyspace = keyspace;
         }
 
         internal Mapper(ISession session, MapperFactory mapperFactory, StatementFactory statementFactory, CqlGenerator cqlGenerator)
         {
-            if (session == null) throw new ArgumentNullException("session");
-            if (mapperFactory == null) throw new ArgumentNullException("mapperFactory");
-            if (statementFactory == null) throw new ArgumentNullException("statementFactory");
-            if (cqlGenerator == null) throw new ArgumentNullException("cqlGenerator");
-
-            _session = session;
-            _mapperFactory = mapperFactory;
-            _statementFactory = statementFactory;
-            _cqlGenerator = cqlGenerator;
+            _session = session ?? throw new ArgumentNullException(nameof(session));
+            _mapperFactory = mapperFactory ?? throw new ArgumentNullException(nameof(mapperFactory));
+            _statementFactory = statementFactory ?? throw new ArgumentNullException(nameof(statementFactory));
+            _cqlGenerator = cqlGenerator ?? throw new ArgumentNullException(nameof(cqlGenerator));
             if (_mapperFactory.PocoDataFactory.OnKeySpaceRequested == null)
             {
                 _mapperFactory.PocoDataFactory.OnKeySpaceRequested += MappingConfiguration.Global.OnKeySpaceRequested;
             }
-            if (session.Cluster != null && session.Cluster.Configuration != null)
+            if (session.Cluster?.Configuration != null)
             {
                 _queryAbortTimeout = session.Cluster.Configuration.ClientOptions.QueryAbortTimeout;
             }
@@ -87,7 +84,7 @@ namespace Cassandra.Mapping
         public Task<IEnumerable<T>> FetchAsync<T>(Cql cql)
         {
             //Use ExecuteAsyncAndAdapt with a delegate to handle the adaptation from RowSet to IEnumerable<T>
-            _cqlGenerator.AddSelect<T>(cql);
+            _cqlGenerator.AddSelect<T>(cql,_keyspace);
             return ExecuteAsyncAndAdapt(cql, (s, rs) =>
             {
                 var mapper = _mapperFactory.GetMapper<T>(cql.Statement, rs);
@@ -103,7 +100,7 @@ namespace Cassandra.Mapping
                 throw new ArgumentNullException("cql");
             }
             cql.AutoPage = false;
-            _cqlGenerator.AddSelect<T>(cql);
+            _cqlGenerator.AddSelect<T>(cql, _keyspace);
             return ExecuteAsyncAndAdapt<IPage<T>>(cql, (stmt, rs) =>
             {
                 var mapper = _mapperFactory.GetMapper<T>(cql.Statement, rs);
@@ -132,7 +129,7 @@ namespace Cassandra.Mapping
         /// <inheritdoc />
         public Task<T> SingleAsync<T>(Cql cql)
         {
-            _cqlGenerator.AddSelect<T>(cql);
+            _cqlGenerator.AddSelect<T>(cql, _keyspace);
             return ExecuteAsyncAndAdapt(cql, (s, rs) =>
             {
                 var mapper = _mapperFactory.GetMapper<T>(cql.Statement, rs);
@@ -149,7 +146,7 @@ namespace Cassandra.Mapping
         /// <inheritdoc />
         public Task<T> SingleOrDefaultAsync<T>(Cql cql)
         {
-            _cqlGenerator.AddSelect<T>(cql);
+            _cqlGenerator.AddSelect<T>(cql, _keyspace);
             return ExecuteAsyncAndAdapt(cql, (s, rs) =>
             {
                 var row = rs.SingleOrDefault();
@@ -172,7 +169,7 @@ namespace Cassandra.Mapping
         /// <inheritdoc />
         public Task<T> FirstAsync<T>(Cql cql)
         {
-            _cqlGenerator.AddSelect<T>(cql);
+            _cqlGenerator.AddSelect<T>(cql, _keyspace);
             return ExecuteAsyncAndAdapt(cql, (s, rs) =>
             {
                 var row = rs.First();
@@ -188,10 +185,29 @@ namespace Cassandra.Mapping
             return FirstOrDefaultAsync<T>(Cql.New(cql, args, CqlQueryOptions.None));
         }
 
+        public Task<long> CountAsync<T>(string cql, params object[] args)
+        {
+            return CountAsync<T>(Cql.New(cql, args, CqlQueryOptions.None));
+        }
+        public Task<long> CountAsync<T>(Cql cql)
+        {
+            _cqlGenerator.GenerateCount<T>(cql,_keyspace);
+            return ExecuteAsyncAndAdapt(cql, (s, rs) =>
+            {
+                var result = default(long);
+                var row = rs.FirstOrDefault();
+                if (row != null)
+                {
+                    result = (long)row[0];
+                }
+                return result;
+            });
+            
+        }
         /// <inheritdoc />
         public Task<T> FirstOrDefaultAsync<T>(Cql cql)
         {
-            _cqlGenerator.AddSelect<T>(cql);
+            _cqlGenerator.AddSelect<T>(cql, _keyspace);
             return ExecuteAsyncAndAdapt(cql, (s, rs) =>
             {
                 var row = rs.FirstOrDefault();

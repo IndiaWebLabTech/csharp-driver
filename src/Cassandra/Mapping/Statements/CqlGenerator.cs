@@ -40,7 +40,9 @@ namespace Cassandra.Mapping.Statements
         {
             // If it's already got a SELECT clause, just bail
             if (SelectRegex.IsMatch(cql.Statement))
+            {
                 return;
+            }
 
             // Get the PocoData so we can generate a list of columns
             var pocoData = _pocoDataFactory.GetPocoData<T>();
@@ -51,7 +53,38 @@ namespace Cassandra.Mapping.Statements
                                  ? string.Format("SELECT {0} {1}", allColumns, cql.Statement)
                                  : string.Format("SELECT {0} FROM {1} {2}", allColumns, GetEscapedTableName(pocoData), cql.Statement));
         }
+        /// <summary>
+        /// Adds "SELECT columnlist" and "FROM tablename" to a CQL statement if they don't already exist for a POCO of Type T.
+        /// </summary>
+        public void AddSelect<T>(Cql cql,string keyspace)
+        {
+            if (!string.IsNullOrWhiteSpace(keyspace) && !string.IsNullOrWhiteSpace(cql.Statement) &&
+                cql.Statement.ToLower().Contains("@db."))
+            {
+                if (!keyspace.Contains('.'))
+                {
+                    keyspace += ".";
+                }
+                cql.SetStatement(cql.Statement.Replace("@db.",keyspace));
+            }
+            // If it's already got a SELECT clause, just bail
+            if (SelectRegex.IsMatch(cql.Statement))
+            {
+                return;
+            }
 
+            // Get the PocoData so we can generate a list of columns
+            var pocoData = _pocoDataFactory.GetPocoData<T>();
+            var allColumns = pocoData.Columns.Select(Escape(pocoData)).ToCommaDelimitedString();
+            if (!string.IsNullOrWhiteSpace(keyspace)&&pocoData.KeyspaceName.ToLower()!=keyspace.Replace(".","").ToLower())
+            {
+                pocoData.KeyspaceName = keyspace.Replace(".","").ToLower();
+            }
+            // If it's got the from clause, leave FROM intact, otherwise add it
+            cql.SetStatement(FromRegex.IsMatch(cql.Statement)
+                ? string.Format("SELECT {0} {1}", allColumns, cql.Statement)
+                : string.Format("SELECT {0} FROM {1} {2}", allColumns, GetEscapedTableName(pocoData), cql.Statement));
+        }
         private static string GetEscapedTableName(PocoData pocoData)
         {
             string name = null;
@@ -236,7 +269,35 @@ namespace Cassandra.Mapping.Statements
             var pkColumns = String.Join(" AND ", pocoData.GetPrimaryKeyColumns().Select(Escape(pocoData, "{0} = ?")));
             return string.Format("DELETE FROM {0} WHERE {1}", GetEscapedTableName(pocoData), pkColumns);
         }
+        /// <summary>
+        /// Generates a "DELETE FROM tablename WHERE pkcolumns = ?" statement for a POCO of Type T.
+        /// </summary>
+        public void GenerateCount<T>(Cql cql,string keyspace="")
+        {
+            if (!string.IsNullOrWhiteSpace(keyspace) && !string.IsNullOrWhiteSpace(cql.Statement) &&
+                cql.Statement.ToLower().Contains("@db."))
+            {
+                if (!keyspace.Contains('.'))
+                {
+                    keyspace += ".";
+                }
+                cql.SetStatement(cql.Statement.Replace("@db.",keyspace));
+            }
+            // If it's already got a SELECT clause, just bail
+            if (SelectRegex.IsMatch(cql.Statement))
+            {
+                return;
+            }
 
+            // Get the PocoData so we can generate a list of columns
+            var pocoData = _pocoDataFactory.GetPocoData<T>();
+
+            // If it's got the from clause, leave FROM intact, otherwise add it
+            var query = FromRegex.IsMatch(cql.Statement)
+                ? $"SELECT count(*) {cql.Statement}"
+                : $"SELECT count(*) FROM {GetEscapedTableName(pocoData)} {cql.Statement}";
+            cql.SetStatement(query);
+        }
         /// <summary>
         /// Prepends the CQL statement specified with "DELETE FROM tablename " for a POCO of Type T.
         /// </summary>

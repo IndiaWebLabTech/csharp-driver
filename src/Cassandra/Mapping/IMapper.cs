@@ -259,5 +259,8 @@ namespace Cassandra.Mapping
         /// query within the batch will be ignored.
         /// </remarks>
         AppliedInfo<T> ExecuteConditional<T>(ICqlBatch batch);
+
+        Task<long> CountAsync<T>(string cql, params object[] args);
+        Task<long> CountAsync<T>(Cql cql);
     }
 }
