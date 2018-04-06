@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -237,6 +238,253 @@ namespace Cassandra.IntegrationTests.Core
                 var ports = sCluster.GetConnectedPorts();
                 //coreConnectionLength + 1 (the control connection) 
                 Assert.AreEqual(coreConnectionLength + 1, ports.Count);
+            }
+        }
+
+        [Test]
+        public async Task ControlConnection_Should_Reconnect_To_Up_Host()
+        {
+            const int connectionLength = 1;
+            var builder = Cluster.Builder()
+                                 .WithPoolingOptions(new PoolingOptions()
+                                     .SetCoreConnectionsPerHost(HostDistance.Local, connectionLength)
+                                     .SetMaxConnectionsPerHost(HostDistance.Local, connectionLength)
+                                     .SetHeartBeatInterval(1000))
+                                 .WithReconnectionPolicy(new ConstantReconnectionPolicy(100L));
+            using (var testCluster = SimulacronCluster.CreateNew(new SimulacronOptions { Nodes = "3" }))
+            using (var cluster = builder.AddContactPoint(testCluster.InitialContactPoint).Build())
+            {
+                var session = (Session)cluster.Connect();
+                var allHosts = cluster.AllHosts();
+                Assert.AreEqual(3, allHosts.Count);
+                await TestHelper.TimesLimit(() =>
+                    session.ExecuteAsync(new SimpleStatement("SELECT * FROM system.local")), 100, 16);
+
+                // 1 per hosts + control connection
+                WaitSimulatorConnections(testCluster, 4);
+                Assert.AreEqual(4, testCluster.GetConnectedPorts().Count);
+
+                var ccAddress = cluster.GetControlConnection().Address;
+                var simulacronNode = testCluster.GetNode(ccAddress);
+
+                // Disable new connections to the first host
+                await simulacronNode.DisableConnectionListener();
+
+                Assert.NotNull(simulacronNode);
+                var connections = simulacronNode.GetConnections();
+
+                // Drop connections to the host that is being used by the control connection
+                Assert.AreEqual(2, connections.Count);
+                await testCluster.DropConnection(connections[0]);
+                await testCluster.DropConnection(connections[1]);
+
+                TestHelper.WaitUntil(() => !cluster.GetHost(ccAddress).IsUp);
+
+                Assert.False(cluster.GetHost(ccAddress).IsUp);
+
+                TestHelper.WaitUntil(() => !cluster.GetControlConnection().Address.Address.Equals(ccAddress.Address));
+
+                Assert.AreNotEqual(ccAddress.Address, cluster.GetControlConnection().Address.Address);
+
+                // Previous host is still DOWN
+                Assert.False(cluster.GetHost(ccAddress).IsUp);
+
+                // New host is UP
+                ccAddress = cluster.GetControlConnection().Address;
+                Assert.True(cluster.GetHost(ccAddress).IsUp);
+            }
+        }
+
+        [Test]
+        public async Task ControlConnection_Should_Reconnect_After_Failed_Attemps()
+        {
+            const int connectionLength = 1;
+            var builder = Cluster.Builder()
+                                 .WithPoolingOptions(new PoolingOptions()
+                                     .SetCoreConnectionsPerHost(HostDistance.Local, connectionLength)
+                                     .SetMaxConnectionsPerHost(HostDistance.Local, connectionLength)
+                                     .SetHeartBeatInterval(1000))
+                                 .WithReconnectionPolicy(new ConstantReconnectionPolicy(100L));
+            using (var testCluster = SimulacronCluster.CreateNew(new SimulacronOptions { Nodes = "3" }))
+            using (var cluster = builder.AddContactPoint(testCluster.InitialContactPoint).Build())
+            {
+                var session = (Session)cluster.Connect();
+                var allHosts = cluster.AllHosts();
+                Assert.AreEqual(3, allHosts.Count);
+                await TestHelper.TimesLimit(() =>
+                    session.ExecuteAsync(new SimpleStatement("SELECT * FROM system.local")), 100, 16);
+
+                var serverConnections = testCluster.GetConnectedPorts();
+                // 1 per hosts + control connection
+                WaitSimulatorConnections(testCluster, 4);
+                Assert.AreEqual(4, serverConnections.Count);
+
+                // Disable all connections
+                await testCluster.DisableConnectionListener();
+
+                var ccAddress = cluster.GetControlConnection().Address;
+
+                // Drop all connections to hosts
+                foreach (var connection in serverConnections)
+                {
+                    await testCluster.DropConnection(connection);
+                }
+
+                TestHelper.WaitUntil(() => !cluster.GetHost(ccAddress).IsUp);
+
+                // All host should be down by now
+                TestHelper.WaitUntil(() => cluster.AllHosts().All(h => !h.IsUp));
+
+                Assert.False(cluster.GetHost(ccAddress).IsUp);
+
+                // Allow new connections to be created
+                await testCluster.EnableConnectionListener();
+
+                TestHelper.WaitUntil(() => cluster.AllHosts().All(h => h.IsUp));
+
+                ccAddress = cluster.GetControlConnection().Address;
+                Assert.True(cluster.GetHost(ccAddress).IsUp);
+
+                // Once all connections are created, the control connection should be usable
+                WaitSimulatorConnections(testCluster, 4);
+                Assert.DoesNotThrowAsync(() => cluster.GetControlConnection().QueryAsync("SELECT * FROM system.local"));
+            }
+        }
+
+        [Test]
+        public async Task Should_Use_Next_Host_When_First_Host_Is_Busy()
+        {
+            const int connectionLength = 2;
+            const int maxRequestsPerConnection = 100;
+            var builder = Cluster.Builder()
+                                 .WithPoolingOptions(
+                                     PoolingOptions.Create()
+                                                   .SetCoreConnectionsPerHost(HostDistance.Local, connectionLength)
+                                                   .SetMaxConnectionsPerHost(HostDistance.Local, connectionLength)
+                                                   .SetHeartBeatInterval(0)
+                                                   .SetMaxRequestsPerConnection(maxRequestsPerConnection))
+                                 .WithLoadBalancingPolicy(new TestHelper.OrderedLoadBalancingPolicy());
+            using (var testCluster = SimulacronCluster.CreateNew(new SimulacronOptions { Nodes = "3" }))
+            using (var cluster = builder.AddContactPoint(testCluster.InitialContactPoint).Build())
+            {
+                const string query = "SELECT * FROM simulated_ks.table1";
+                testCluster.Prime(new
+                {
+                    when = new { query },
+                    then = new { result = "success", delay_in_ms = 3000 }
+                });
+
+                var session = await cluster.ConnectAsync();
+                var hosts = cluster.AllHosts().ToArray();
+
+                // Wait until all connections to first host are created
+                await TestHelper.WaitUntilAsync(() =>
+                    session.GetState().GetInFlightQueries(hosts[0]) == connectionLength);
+
+                const int overflowToNextHost = 10;
+                var length = maxRequestsPerConnection * connectionLength + Environment.ProcessorCount +
+                             overflowToNextHost;
+                var tasks = new List<Task<RowSet>>(length);
+
+                for (var i = 0; i < length; i++)
+                {
+                    tasks.Add(session.ExecuteAsync(new SimpleStatement(query)));
+                }
+
+                var results = await Task.WhenAll(tasks);
+
+                // At least the first n (maxRequestsPerConnection * connectionLength) went to the first host
+                Assert.That(results.Count(r => r.Info.QueriedHost.Equals(hosts[0].Address)),
+                    Is.GreaterThanOrEqualTo(maxRequestsPerConnection * connectionLength));
+
+                // At least the following m (overflowToNextHost) went to the second host
+                Assert.That(results.Count(r => r.Info.QueriedHost.Equals(hosts[1].Address)),
+                    Is.GreaterThanOrEqualTo(overflowToNextHost));
+            }
+        }
+
+        [Test]
+        public async Task Should_Throw_NoHostAvailableException_When_All_Host_Are_Busy()
+        {
+            const int connectionLength = 2;
+            const int maxRequestsPerConnection = 50;
+            var lbp = new TestHelper.OrderedLoadBalancingPolicy().UseRoundRobin();
+
+            var builder = Cluster.Builder()
+                                 .WithPoolingOptions(
+                                     PoolingOptions.Create()
+                                                   .SetCoreConnectionsPerHost(HostDistance.Local, connectionLength)
+                                                   .SetMaxConnectionsPerHost(HostDistance.Local, connectionLength)
+                                                   .SetHeartBeatInterval(0)
+                                                   .SetMaxRequestsPerConnection(maxRequestsPerConnection))
+                                 .WithSocketOptions(new SocketOptions().SetReadTimeoutMillis(0))
+                                 .WithLoadBalancingPolicy(lbp);
+
+            using (var testCluster = SimulacronCluster.CreateNew(new SimulacronOptions { Nodes = "3" }))
+            using (var cluster = builder.AddContactPoint(testCluster.InitialContactPoint).Build())
+            {
+                const string query = "SELECT * FROM simulated_ks.table1";
+                testCluster.Prime(new
+                {
+                    when = new { query },
+                    then = new { result = "success", delay_in_ms = 3000 }
+                });
+
+                var session = await cluster.ConnectAsync();
+                var hosts = cluster.AllHosts().ToArray();
+
+                await TestHelper.TimesLimit(() =>
+                    session.ExecuteAsync(new SimpleStatement("SELECT key FROM system.local")), 100, 16);
+
+                // Wait until all connections to all host are created
+                await TestHelper.WaitUntilAsync(() =>
+                {
+                    var state = session.GetState();
+                    return state.GetConnectedHosts().All(h => state.GetInFlightQueries(h) == connectionLength);
+                });
+
+                lbp.UseFixedOrder();
+
+                const int busyExceptions = 10;
+                var length = maxRequestsPerConnection * connectionLength * hosts.Length + Environment.ProcessorCount +
+                             busyExceptions;
+                var tasks = new List<Task<Exception>>(length);
+
+                for (var i = 0; i < length; i++)
+                {
+                    tasks.Add(TestHelper.EatUpException(session.ExecuteAsync(new SimpleStatement(query))));
+                }
+
+                var results = await Task.WhenAll(tasks);
+
+                // Only successful responses or NoHostAvailableException expected
+                Assert.Null(results.FirstOrDefault(e => e != null && !(e is NoHostAvailableException)));
+
+                // At least the first n (maxRequestsPerConnection * connectionLength * hosts.length) succeeded
+                Assert.That(results.Count(e => e == null),
+                    Is.GreaterThanOrEqualTo(maxRequestsPerConnection * connectionLength * hosts.Length));
+
+                // At least the following m (busyExceptions) failed
+                var failed = results.Where(e => e is NoHostAvailableException).Cast<NoHostAvailableException>()
+                                    .ToArray();
+                Assert.That(failed, Has.Length.GreaterThanOrEqualTo(busyExceptions));
+
+                foreach (var ex in failed)
+                {
+                    Assert.That(ex.Errors, Has.Count.EqualTo(hosts.Length));
+
+                    foreach (var kv in ex.Errors)
+                    {
+                        Assert.IsInstanceOf<BusyPoolException>(kv.Value);
+                        var busyException = (BusyPoolException) kv.Value;
+                        Assert.AreEqual(kv.Key, busyException.Address);
+                        Assert.That(busyException.ConnectionLength, Is.EqualTo(connectionLength));
+                        Assert.That(busyException.MaxRequestsPerConnection, Is.EqualTo(maxRequestsPerConnection));
+                        Assert.That(busyException.Message, Is.EqualTo(
+                            $"All connections to host {busyException.Address} are busy, {maxRequestsPerConnection}" +
+                            $" requests are in-flight on each {connectionLength} connection(s)"));
+                    }
+                }
             }
         }
     }

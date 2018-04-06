@@ -14,12 +14,15 @@ namespace Cassandra.IntegrationTests.Linq.LinqMethods
     [Category("short")]
     public class Where : SharedClusterTest
     {
-        ISession _session = null;
-        private List<Movie> _movieList = Movie.GetDefaultMovieList();
+        private ISession _session;
+        private readonly List<Movie> _movieList = Movie.GetDefaultMovieList();
+        private readonly List<ManyDataTypesEntity> _manyDataTypesEntitiesList = ManyDataTypesEntity.GetDefaultAllDataTypesList();
         readonly string _uniqueKsName = TestUtils.GetUniqueKeyspaceName();
         private Table<Movie> _movieTable;
+        private Table<ManyDataTypesEntity> _manyDataTypesEntitiesTable;
         private readonly List<Tuple<int, long>> _tupleList = new List<Tuple<int, long>> {Tuple.Create(0, 0L), Tuple.Create(1, 1L)};
         private static readonly List<Tuple<int, long>> TupleList = new List<Tuple<int, long>> {Tuple.Create(0, 0L), Tuple.Create(1, 1L)};
+        const short ExpectedShortValue = 11;
 
         public override void OneTimeSetUp()
         {
@@ -29,15 +32,23 @@ namespace Cassandra.IntegrationTests.Linq.LinqMethods
             _session.ChangeKeyspace(_uniqueKsName);
 
             // drop table if exists, re-create
-            MappingConfiguration movieMappingConfig = new MappingConfiguration();
+            var movieMappingConfig = new MappingConfiguration();
             movieMappingConfig.MapperFactory.PocoDataFactory.AddDefinitionDefault(typeof(Movie),
-                 () => LinqAttributeBasedTypeDefinition.DetermineAttributes(typeof(Movie)));
+                () => LinqAttributeBasedTypeDefinition.DetermineAttributes(typeof(Movie)));
+            movieMappingConfig.MapperFactory.PocoDataFactory.AddDefinitionDefault(typeof(ManyDataTypesEntity),
+                () => LinqAttributeBasedTypeDefinition.DetermineAttributes(typeof(ManyDataTypesEntity)));
             _movieTable = new Table<Movie>(_session, movieMappingConfig);
             _movieTable.Create();
+
+            _manyDataTypesEntitiesTable = new Table<ManyDataTypesEntity>(_session, movieMappingConfig);
+            _manyDataTypesEntitiesTable.Create();
 
             //Insert some data
             foreach (var movie in _movieList)
                 _movieTable.Insert(movie).Execute();
+
+            foreach (var manyData in _manyDataTypesEntitiesList)
+                _manyDataTypesEntitiesTable.Insert(manyData).Execute();
         }
 
         [Test]
@@ -47,7 +58,7 @@ namespace Cassandra.IntegrationTests.Linq.LinqMethods
 
             // test
             var taskSelect = _movieTable.Where(m => m.Title == expectedMovie.Title && m.MovieMaker == expectedMovie.MovieMaker).ExecuteAsync();
-            List<Movie> movies = taskSelect.Result.ToList();
+            var movies = taskSelect.Result.ToList();
             Assert.AreEqual(1, movies.Count);
 
             var actualMovie = movies.First();
@@ -60,7 +71,7 @@ namespace Cassandra.IntegrationTests.Linq.LinqMethods
             var expectedMovie = _movieList.First();
 
             // test
-            List<Movie> movies = _movieTable.Where(m => m.Title == expectedMovie.Title && m.MovieMaker == expectedMovie.MovieMaker).Execute().ToList();
+            var movies = _movieTable.Where(m => m.Title == expectedMovie.Title && m.MovieMaker == expectedMovie.MovieMaker).Execute().ToList();
             Assert.AreEqual(1, movies.Count);
 
             var actualMovie = movies.First();
@@ -75,7 +86,7 @@ namespace Cassandra.IntegrationTests.Linq.LinqMethods
             // test
             var linqWhere = _movieTable.Where(m => m.Title == expectedMovie.Title && m.MovieMaker == expectedMovie.MovieMaker);
             linqWhere.EnableTracing();
-            List<Movie> movies = linqWhere.Execute().ToList();
+            var movies = linqWhere.Execute().ToList();
             Assert.AreEqual(1, movies.Count);
             var actualMovie = movies.First();
             Movie.AssertEquals(expectedMovie, actualMovie);
@@ -87,10 +98,10 @@ namespace Cassandra.IntegrationTests.Linq.LinqMethods
         [Test]
         public void LinqWhere_NoSuchRecord()
         {
-            Movie existingMovie = _movieList.Last();
-            string randomStr = "somethingrandom_" + Randomm.RandomAlphaNum(10);
+            var existingMovie = _movieList.Last();
+            var randomStr = "somethingrandom_" + Randomm.RandomAlphaNum(10);
 
-            List<Movie> movies = _movieTable.Where(m => m.Title == existingMovie.Title && m.MovieMaker == randomStr).Execute().ToList();
+            var movies = _movieTable.Where(m => m.Title == existingMovie.Title && m.MovieMaker == randomStr).Execute().ToList();
             Assert.AreEqual(0, movies.Count);
         }
 
@@ -109,7 +120,7 @@ namespace Cassandra.IntegrationTests.Linq.LinqMethods
         public void LinqWhere_Exception()
         {
             //No translation in CQL
-            Assert.Throws<SyntaxError>(() => _movieTable.Where(m => m.Year is int).Execute());
+            Assert.Throws<CqlLinqNotSupportedException>(() => _movieTable.Where(m => m.Year is int).Execute());
             //No partition key in Query
             Assert.Throws<InvalidQueryException>(() => _movieTable.Where(m => m.Year == 100).Execute());
             Assert.Throws<InvalidQueryException>(() => _movieTable.Where(m => m.MainActor == null).Execute());
@@ -131,7 +142,7 @@ namespace Cassandra.IntegrationTests.Linq.LinqMethods
         [Test]
         public void LinqWhere_NoTranslationFromLinqToCql()
         {
-            Assert.Throws<SyntaxError>(() => _movieTable.Where(m => m.Year is int).Execute());
+            Assert.Throws<CqlLinqNotSupportedException>(() => _movieTable.Where(m => m.Year is int).Execute());
         }
 
         [Test]
@@ -161,9 +172,9 @@ namespace Cassandra.IntegrationTests.Linq.LinqMethods
             int date = 2;
             long time = 3;
 
-            MappingConfiguration config = new MappingConfiguration();
+            var config = new MappingConfiguration();
             config.MapperFactory.PocoDataFactory.AddDefinitionDefault(typeof(TestTable), () => LinqAttributeBasedTypeDefinition.DetermineAttributes(typeof(TestTable)));
-            Table<TestTable> table = new Table<TestTable>(_session, config);
+            var table = new Table<TestTable>(_session, config);
             table.CreateIfNotExists();
 
             table.Insert(new TestTable { UserId = 1, Date = 2, TimeColumn = 1 }).Execute();
@@ -172,24 +183,24 @@ namespace Cassandra.IntegrationTests.Linq.LinqMethods
             table.Insert(new TestTable { UserId = 1, Date = 2, TimeColumn = 4 }).Execute();
             table.Insert(new TestTable { UserId = 1, Date = 2, TimeColumn = 5 }).Execute();
 
-            CqlQuery<TestTable> query1Actual = table.Where(i => i.UserId == userId && i.Date == date);
+            var query1Actual = table.Where(i => i.UserId == userId && i.Date == date);
 
-            CqlQuery<TestTable> query2Actual = query1Actual.Where(i => i.TimeColumn >= time);
+            var query2Actual = query1Actual.Where(i => i.TimeColumn >= time);
             query2Actual = query2Actual.OrderBy(i => i.TimeColumn); // ascending
 
-            CqlQuery<TestTable> query3Actual = query1Actual.Where(i => i.TimeColumn <= time);
+            var query3Actual = query1Actual.Where(i => i.TimeColumn <= time);
             query3Actual = query3Actual.OrderByDescending(i => i.TimeColumn);
 
-            string query1Expected = "SELECT \"user\", \"date\", \"time\" FROM \"test1\" WHERE \"user\" = ? AND \"date\" = ? ALLOW FILTERING";
-            string query2Expected = "SELECT \"user\", \"date\", \"time\" FROM \"test1\" WHERE \"user\" = ? AND \"date\" = ? AND \"time\" >= ? ORDER BY \"time\" ALLOW FILTERING";
-            string query3Expected = "SELECT \"user\", \"date\", \"time\" FROM \"test1\" WHERE \"user\" = ? AND \"date\" = ? AND \"time\" <= ? ORDER BY \"time\" DESC ALLOW FILTERING";
+            var query1Expected = "SELECT \"user\", \"date\", \"time\" FROM \"test1\" WHERE \"user\" = ? AND \"date\" = ? ALLOW FILTERING";
+            var query2Expected = "SELECT \"user\", \"date\", \"time\" FROM \"test1\" WHERE \"user\" = ? AND \"date\" = ? AND \"time\" >= ? ORDER BY \"time\" ALLOW FILTERING";
+            var query3Expected = "SELECT \"user\", \"date\", \"time\" FROM \"test1\" WHERE \"user\" = ? AND \"date\" = ? AND \"time\" <= ? ORDER BY \"time\" DESC ALLOW FILTERING";
 
             Assert.AreEqual(query1Expected, query1Actual.ToString());
             Assert.AreEqual(query2Expected, query2Actual.ToString());
             Assert.AreEqual(query3Expected, query3Actual.ToString());
 
-            List<TestTable> result2Actual = query2Actual.Execute().ToList();
-            List<TestTable> result3Actual = query3Actual.Execute().ToList();
+            var result2Actual = query2Actual.Execute().ToList();
+            var result3Actual = query3Actual.Execute().ToList();
 
             Assert.AreEqual(3, result2Actual.First().TimeColumn);
             Assert.AreEqual(5, result2Actual.Last().TimeColumn);
@@ -314,6 +325,118 @@ namespace Cassandra.IntegrationTests.Linq.LinqMethods
             var listOuterStaticScopeResults = table.Where(t => t.UserId == 1 && TupleList.Contains(Tuple.Create(t.Date, t.TimeColumn))).Execute();
             Assert.NotNull(listOuterStaticScopeResults);
             Assert.AreEqual(1, listOuterStaticScopeResults.Count());
+        }
+
+        [Test]
+        [TestCassandraVersion(3,0)]
+        public void LinqWhere_Boolean()
+        {
+            var rs = _manyDataTypesEntitiesTable.Execute();
+            Assert.NotNull(rs);
+            Assert.Greater(rs.Count(), 0);
+            //there are no records with BooleanType == true
+            rs = _manyDataTypesEntitiesTable.Where(m => m.BooleanType).Execute();
+            Assert.NotNull(rs);
+            var rows = rs.ToArray();
+            Assert.AreEqual(0, rows.Length);
+            var guid = Guid.NewGuid();
+            var data = new ManyDataTypesEntity
+            {
+                BooleanType = true,
+                DateTimeOffsetType = DateTimeOffset.Now,
+                DateTimeType = DateTime.Now,
+                DecimalType = 10,
+                DoubleType = 10.0,
+                FloatType = 10.0f,
+                GuidType = guid,
+                IntType = 10,
+                StringType = "Boolean True"
+            };
+            _manyDataTypesEntitiesTable.Insert(data).Execute();
+            rs = _manyDataTypesEntitiesTable.Where(m => m.BooleanType).Execute();
+            Assert.NotNull(rs);
+            rows = rs.ToArray();
+            Assert.AreEqual(1, rows.Length);
+            Assert.AreEqual(guid, rows[0].GuidType);
+            Assert.AreEqual("Boolean True", rows[0].StringType);
+            Assert.IsTrue(rows[0].BooleanType);
+            _manyDataTypesEntitiesTable.Select(m => m).Where(m => m.StringType == data.StringType).Delete().Execute();
+        }
+
+        [Test]
+        [TestCassandraVersion(3,0)]
+        public void LinqWhere_BooleanScopes()
+        {
+            var rs = _manyDataTypesEntitiesTable.Execute();
+            Assert.NotNull(rs);
+            var resultCount = rs.Count();
+            Assert.Greater(resultCount, 0);
+            //Get no records
+            const bool all = true;
+            rs = _manyDataTypesEntitiesTable.Where(m => m.BooleanType == all).Execute();
+            Assert.NotNull(rs);
+            Assert.AreEqual(0, rs.Count());
+            //get all records
+            rs = _manyDataTypesEntitiesTable.Where(m => m.BooleanType == bool.Parse("false")).Execute();
+            Assert.NotNull(rs);
+            Assert.AreEqual(resultCount, rs.Count());
+        }
+
+        [Test, TestCassandraVersion(3, 0)]
+        public void LinqWhere_ShortScopes()
+        {
+            var guid = Guid.NewGuid();
+            const string pk = "Boolean True";
+            var data = new ManyDataTypesEntity
+            {
+                BooleanType = true,
+                DateTimeOffsetType = DateTimeOffset.Now,
+                DateTimeType = DateTime.Now,
+                DecimalType = 11,
+                DoubleType = 11.0,
+                FloatType = 11.0f,
+                GuidType = guid,
+                IntType = 11,
+                Int64Type = 11,
+                StringType = pk
+            };
+            _manyDataTypesEntitiesTable.Insert(data).Execute();
+            //Get poco using constant short
+            const short expectedShortValue = 11;
+            var rs = _manyDataTypesEntitiesTable
+                     .Where(m => m.StringType == pk && m.IntType == expectedShortValue).AllowFiltering().Execute();
+            Assert.NotNull(rs);
+            Assert.AreEqual(1, rs.Count());
+            rs = _manyDataTypesEntitiesTable.Where(m => m.StringType == pk && m.IntType == ExpectedShortValue)
+                                            .AllowFiltering().Execute();
+            Assert.NotNull(rs);
+            Assert.AreEqual(1, rs.Count());
+            rs = _manyDataTypesEntitiesTable.Where(m => m.StringType == pk && ExpectedShortValue == m.IntType)
+                                            .AllowFiltering().Execute();
+            Assert.NotNull(rs);
+            Assert.AreEqual(1, rs.Count());
+            rs = _manyDataTypesEntitiesTable.Where(m => m.StringType == pk && expectedShortValue == m.IntType)
+                                            .AllowFiltering().Execute();
+            Assert.NotNull(rs);
+            Assert.AreEqual(1, rs.Count());
+            rs = _manyDataTypesEntitiesTable.Where(m => m.StringType == pk && m.Int64Type == expectedShortValue)
+                                            .AllowFiltering().Execute();
+            Assert.NotNull(rs);
+            Assert.AreEqual(1, rs.Count());
+            rs = _manyDataTypesEntitiesTable.Where(m => m.StringType == pk && expectedShortValue == m.Int64Type)
+                                            .AllowFiltering().Execute();
+            Assert.NotNull(rs);
+            Assert.AreEqual(1, rs.Count());
+            rs = _manyDataTypesEntitiesTable.Where(m => m.StringType == pk && m.Int64Type == ExpectedShortValue)
+                                            .AllowFiltering().Execute();
+            Assert.NotNull(rs);
+            Assert.AreEqual(1, rs.Count());
+            rs = _manyDataTypesEntitiesTable.Where(m => m.StringType == pk && ExpectedShortValue == m.Int64Type)
+                                            .AllowFiltering().Execute();
+            Assert.NotNull(rs);
+            Assert.AreEqual(1, rs.Count());
+            _manyDataTypesEntitiesTable.Where(m => m.StringType == pk && m.IntType == expectedShortValue)
+                                       .AllowFiltering().Delete();
         }
 
         [AllowFiltering]

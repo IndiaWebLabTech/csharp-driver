@@ -136,6 +136,7 @@ foreach (var row in rs)
 You can map your [Cassandra User Defined Types][udt] to your application entities.
 
 For a given udt
+
 ```cql
 CREATE TYPE address (
   street text,
@@ -144,7 +145,9 @@ CREATE TYPE address (
   phones set<text>
 );
 ```
+
 For a given class
+
 ```csharp
 public class Address
 {
@@ -156,13 +159,16 @@ public class Address
 ```
 
 You can either map the properties by name
+
 ```csharp
-//Map the properties by name automatically
+// Map the properties by name automatically
 session.UserDefinedTypes.Define(
   UdtMap.For<Address>()
 );
 ```
+
 Or you can define the properties manually
+
 ```csharp
 session.UserDefinedTypes.Define(
   UdtMap.For<Address>()
@@ -236,14 +242,14 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
-  [apidocs]: http://docs.datastax.com/en/drivers/csharp/3.3/
+  [apidocs]: http://docs.datastax.com/en/latest-csharp-driver-api/
   [docindex]: http://docs.datastax.com/en/developer/csharp-driver/latest/
   [features]: http://docs.datastax.com/en/developer/csharp-driver/latest/features/
   [getting-started]: https://academy.datastax.com/resources/getting-started-apache-cassandra-and-c-net
   [nuget]: https://nuget.org/packages/CassandraCSharpDriver/
   [mailinglist]: https://groups.google.com/a/lists.datastax.com/forum/#!forum/csharp-driver-user
   [jira]: https://datastax-oss.atlassian.net/projects/CSHARP/issues
-  [udt]: http://docs.datastax.com/en/cql/3.1/cql/cql_reference/cqlRefUDType.html
+  [udt]: http://docs.datastax.com/en/dse/5.1/cql/cql/cql_using/useInsertUDT.html
   [poco]: http://en.wikipedia.org/wiki/Plain_Old_CLR_Object
   [linq]: http://docs.datastax.com/en/developer/csharp-driver/latest/features/components/linq/
   [mapper]: http://docs.datastax.com/en/developer/csharp-driver/latest/features/components/mapper/
@@ -252,6 +258,6 @@ limitations under the License.
   [upgrade-to-250]: https://github.com/datastax/csharp-driver/blob/master/doc/upgrade-guide-2.5.md
   [upgrade-to-200]: https://github.com/datastax/csharp-driver/blob/master/doc/upgrade-guide-2.0.md
   [survey]: http://goo.gl/forms/3BxcP8nKs6
-  [dse-driver]: https://github.com/datastax/csharp-dse-driver
+  [dse-driver]: https://docs.datastax.com/en/developer/csharp-driver-dse/latest/
   [slack]: https://academy.datastax.com/slack
   [dse]: https://www.datastax.com/products/datastax-enterprise

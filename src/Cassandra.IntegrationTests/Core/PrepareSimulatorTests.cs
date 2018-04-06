@@ -15,7 +15,6 @@
 //
 
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
@@ -56,12 +55,11 @@ namespace Cassandra.IntegrationTests.Core
         [Test]
         public void Should_Prepare_On_First_Node()
         {
-            var simulacronCluster = SimulacronCluster.CreateNew(new SimulacronOptions { Nodes = "3" } );
-            var builder = Cluster.Builder()
-                                 .AddContactPoint(simulacronCluster.InitialContactPoint)
-                                 .WithQueryOptions(new QueryOptions().SetPrepareOnAllHosts(false))
-                                 .WithLoadBalancingPolicy(new OrderedLoadBalancingPolicy());
-            using (var cluster = builder.Build())
+            using (var simulacronCluster = SimulacronCluster.CreateNew(new SimulacronOptions { Nodes = "3" } ))
+            using (var cluster = Cluster.Builder()
+                                        .AddContactPoint(simulacronCluster.InitialContactPoint)
+                                        .WithQueryOptions(new QueryOptions().SetPrepareOnAllHosts(false))
+                                        .WithLoadBalancingPolicy(new TestHelper.OrderedLoadBalancingPolicy()).Build())
             {
                 var session = cluster.Connect();
                 simulacronCluster.Prime(QueryPrime());
@@ -81,11 +79,10 @@ namespace Cassandra.IntegrationTests.Core
         [Test]
         public void Should_Prepare_On_All_Nodes_By_Default()
         {
-            var simulacronCluster = SimulacronCluster.CreateNew(new SimulacronOptions { Nodes = "3" } );
-            var builder = Cluster.Builder()
-                                 .AddContactPoint(simulacronCluster.InitialContactPoint)
-                                 .WithLoadBalancingPolicy(new OrderedLoadBalancingPolicy());
-            using (var cluster = builder.Build())
+            using (var simulacronCluster = SimulacronCluster.CreateNew(new SimulacronOptions { Nodes = "3" } ))
+            using (var cluster = Cluster.Builder()
+                                        .AddContactPoint(simulacronCluster.InitialContactPoint)
+                                        .WithLoadBalancingPolicy(new TestHelper.OrderedLoadBalancingPolicy()).Build())
             {
                 var session = cluster.Connect();
                 simulacronCluster.Prime(QueryPrime());
@@ -104,9 +101,8 @@ namespace Cassandra.IntegrationTests.Core
         [Test]
         public void Should_Reuse_The_Same_Instance()
         {
-            var simulacronCluster = SimulacronCluster.CreateNew(new SimulacronOptions { Nodes = "3" } );
-            var builder = Cluster.Builder().AddContactPoint(simulacronCluster.InitialContactPoint);
-            using (var cluster = builder.Build())
+            using (var simulacronCluster = SimulacronCluster.CreateNew(new SimulacronOptions { Nodes = "3" } ))
+            using (var cluster = Cluster.Builder().AddContactPoint(simulacronCluster.InitialContactPoint).Build())
             {
                 var session = cluster.Connect();
                 simulacronCluster.Prime(QueryPrime());
@@ -120,12 +116,11 @@ namespace Cassandra.IntegrationTests.Core
         [Test]
         public void Should_Failover_When_First_Node_Fails()
         {
-            var simulacronCluster = SimulacronCluster.CreateNew(new SimulacronOptions { Nodes = "3" } );
-            var builder = Cluster.Builder()
-                                 .AddContactPoint(simulacronCluster.InitialContactPoint)
-                                 .WithQueryOptions(new QueryOptions().SetPrepareOnAllHosts(false))
-                                 .WithLoadBalancingPolicy(new OrderedLoadBalancingPolicy());
-            using (var cluster = builder.Build())
+            using (var simulacronCluster = SimulacronCluster.CreateNew(new SimulacronOptions { Nodes = "3" } ))
+            using (var cluster = Cluster.Builder()
+                                        .AddContactPoint(simulacronCluster.InitialContactPoint)
+                                        .WithQueryOptions(new QueryOptions().SetPrepareOnAllHosts(false))
+                                        .WithLoadBalancingPolicy(new TestHelper.OrderedLoadBalancingPolicy()).Build())
             {
                 var session = cluster.Connect();
                 var firstHost = cluster.AllHosts().First();
@@ -144,11 +139,10 @@ namespace Cassandra.IntegrationTests.Core
         [Test]
         public void Should_Prepare_On_All_Ignoring_Individual_Failures()
         {
-            var simulacronCluster = SimulacronCluster.CreateNew(new SimulacronOptions { Nodes = "3" } );
-            var builder = Cluster.Builder()
-                                 .AddContactPoint(simulacronCluster.InitialContactPoint)
-                                 .WithLoadBalancingPolicy(new OrderedLoadBalancingPolicy());
-            using (var cluster = builder.Build())
+            using (var simulacronCluster = SimulacronCluster.CreateNew(new SimulacronOptions { Nodes = "3" } ))
+            using (var cluster = Cluster.Builder()
+                                        .AddContactPoint(simulacronCluster.InitialContactPoint)
+                                        .WithLoadBalancingPolicy(new TestHelper.OrderedLoadBalancingPolicy()).Build())
             {
                 var session = cluster.Connect();
                 var secondHost = cluster.AllHosts().Skip(1).First();
@@ -167,13 +161,12 @@ namespace Cassandra.IntegrationTests.Core
         public void Should_Failover_When_First_Node_Timeouts()
         {
             Diagnostics.CassandraTraceSwitch.Level = TraceLevel.Verbose;
-            var simulacronCluster = SimulacronCluster.CreateNew(new SimulacronOptions { Nodes = "3" } );
-            var builder = Cluster.Builder()
-                                 .AddContactPoint(simulacronCluster.InitialContactPoint)
-                                 .WithQueryOptions(new QueryOptions().SetPrepareOnAllHosts(false))
-                                 .WithSocketOptions(new SocketOptions().SetReadTimeoutMillis(400))
-                                 .WithLoadBalancingPolicy(new OrderedLoadBalancingPolicy());
-            using (var cluster = builder.Build())
+            using (var simulacronCluster = SimulacronCluster.CreateNew(new SimulacronOptions { Nodes = "3" } ))
+            using (var cluster = Cluster.Builder()
+                                        .AddContactPoint(simulacronCluster.InitialContactPoint)
+                                        .WithQueryOptions(new QueryOptions().SetPrepareOnAllHosts(false))
+                                        .WithSocketOptions(new SocketOptions().SetReadTimeoutMillis(400))
+                                        .WithLoadBalancingPolicy(new TestHelper.OrderedLoadBalancingPolicy()).Build())
             {
                 var session = cluster.Connect();
                 var firstHost = cluster.AllHosts().First();
@@ -192,12 +185,11 @@ namespace Cassandra.IntegrationTests.Core
         [Test]
         public async Task Should_Reprepare_On_Up_Node()
         {
-            var simulacronCluster = SimulacronCluster.CreateNew(new SimulacronOptions { Nodes = "3" } );
-            var builder = Cluster.Builder()
-                                 .AddContactPoint(simulacronCluster.InitialContactPoint)
-                                 .WithReconnectionPolicy(new ConstantReconnectionPolicy(500))
-                                 .WithLoadBalancingPolicy(new OrderedLoadBalancingPolicy());
-            using (var cluster = builder.Build())
+            using (var simulacronCluster = SimulacronCluster.CreateNew(new SimulacronOptions { Nodes = "3" } ))
+            using (var cluster = Cluster.Builder()
+                                        .AddContactPoint(simulacronCluster.InitialContactPoint)
+                                        .WithReconnectionPolicy(new ConstantReconnectionPolicy(500))
+                                        .WithLoadBalancingPolicy(new TestHelper.OrderedLoadBalancingPolicy()).Build())
             {
                 var session = cluster.Connect();
                 simulacronCluster.Prime(QueryPrime());
@@ -216,26 +208,6 @@ namespace Cassandra.IntegrationTests.Core
                 TestHelper.WaitUntil(() => node.GetQueries(Query, "PREPARE").Count == 2);
                 // It should be prepared 2 times
                 Assert.AreEqual(2, node.GetQueries(Query, "PREPARE").Count);
-            }
-        }
-        
-        private class OrderedLoadBalancingPolicy : ILoadBalancingPolicy
-        {
-            private ICollection<Host> _hosts;
-
-            public void Initialize(ICluster cluster)
-            {
-                _hosts = cluster.AllHosts();
-            }
-
-            public HostDistance Distance(Host host)
-            {
-                return HostDistance.Local;
-            }
-
-            public IEnumerable<Host> NewQueryPlan(string keyspace, IStatement query)
-            {
-                return _hosts;
             }
         }
     }
