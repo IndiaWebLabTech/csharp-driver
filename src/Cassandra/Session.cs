@@ -106,6 +106,7 @@ namespace Cassandra
         {
             return await PrepareOrGetAsync(cqlQuery,"");
         }
+        public string CurrantKeySpace => MappingConfiguration.Global.OnKeySpaceRequested != null ? $"{MappingConfiguration.Global.OnKeySpaceRequested?.Invoke()}" : "";
         public async Task<PreparedStatement> PrepareOrGetAsync(string cqlQuery,string keyspace)
         {
             var db = string.IsNullOrWhiteSpace(keyspace) ? (MappingConfiguration.Global.OnKeySpaceRequested != null ? $"{MappingConfiguration.Global.OnKeySpaceRequested?.Invoke()}." : "") : keyspace;

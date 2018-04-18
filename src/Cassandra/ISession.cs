@@ -83,7 +83,7 @@ namespace Cassandra
         /// <param name="keyspaceName">Case-sensitive name of keyspace to be used.</param>
         /// <exception cref="InvalidQueryException">When keyspace does not exist</exception>
         void ChangeKeyspace(string keyspaceName);
-
+        string CurrantKeySpace { get; }
         /// <summary>
         ///  Creates new keyspace in current cluster.        
         /// </summary>
