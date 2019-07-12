@@ -1,5 +1,5 @@
 //
-//      Copyright (C) 2012-2014 DataStax Inc.
+//      Copyright (C) DataStax Inc.
 //
 //   Licensed under the Apache License, Version 2.0 (the "License");
 //   you may not use this file except in compliance with the License.
@@ -77,6 +77,25 @@ namespace Cassandra
         }
 
         /// <summary>
+        /// Get this socket's local address.
+        /// </summary>
+        /// <returns>The socket's local address.</returns>
+        public IPEndPoint GetLocalIpEndPoint()
+        {
+            try
+            {
+                var s = _socket;
+
+                return (IPEndPoint) s?.LocalEndPoint;
+            }
+            catch (Exception ex)
+            {
+                TcpSocket._logger.Warning("Exception thrown when trying to get LocalIpEndpoint: {0}", ex.ToString());
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Initializes the socket options
         /// </summary>
         public void Init()
@@ -131,9 +150,15 @@ namespace Cassandra
                 tcs.TrySetResult(true);
                 e.Dispose();
             };
+
+            var willCompleteAsync = _socket.ConnectAsync(eventArgs);
+            if (!willCompleteAsync)
+            {
+                // Make the task complete asynchronously
+                Task.Run(() => tcs.TrySetResult(true)).Forget();
+            }
             try
             {
-                _socket.ConnectAsync(eventArgs);
                 await socketConnectTask.ConfigureAwait(false);
             }
             finally

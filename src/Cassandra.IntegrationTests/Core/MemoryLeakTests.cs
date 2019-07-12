@@ -1,4 +1,4 @@
-﻿#if !(NETCORE || LINUX)
+﻿#if NET452 && !LINUX
 using System;
 using System.Net.Sockets;
 using System.Threading;
@@ -8,10 +8,9 @@ using NUnit.Framework;
 
 namespace Cassandra.IntegrationTests.Core
 {
-    [TestFixture, Category("memory")]
+    [TestFixture, Category("memory"), Explicit("this test needs dotMemory")]
     class MemoryLeakTests
     {
-
         [Test]
         public void Monitor_Should_Not_Leak_Connections_Test()
         {

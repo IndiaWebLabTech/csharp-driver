@@ -10,10 +10,11 @@ using Cassandra.IntegrationTests.TestClusterManagement;
 using Cassandra.Tasks;
 using Cassandra.Tests;
 using NUnit.Framework;
+#pragma warning disable 618
 
 namespace Cassandra.IntegrationTests.Core
 {
-    [TestFixture, Category("long")]
+    [TestFixture, Category("long"), Ignore("tests that are not marked with 'short' need to be refactored/deleted")]
     public class SpeculativeExecutionLongTests : TestGlobals
     {
         private const string QueryLocal = "SELECT key FROM system.local";

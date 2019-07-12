@@ -1,5 +1,5 @@
 //
-//      Copyright (C) 2012-2016 DataStax Inc.
+//      Copyright (C) DataStax Inc.
 //
 //   Licensed under the Apache License, Version 2.0 (the "License");
 //   you may not use this file except in compliance with the License.
@@ -15,36 +15,43 @@
 //
 
 using System;
-using System.Linq;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Threading;
-using System.Collections.Concurrent;
 using System.Threading.Tasks;
 using Cassandra.Mapping;
 using Cassandra.Tasks;
+using Cassandra.Connections;
+using Cassandra.ExecutionProfiles;
 using Cassandra.Requests;
 using Cassandra.Serialization;
+using Cassandra.SessionManagement;
+using Cassandra.Tasks;
 
 namespace Cassandra
 {
-    /// <summary>
-    /// Implementation of <see cref="ISession"/>.
-    /// </summary>
     /// <inheritdoc cref="Cassandra.ISession" />
-    public class Session : ISession
+    public class Session : IInternalSession
     {
         private readonly Serializer _serializer;
+        private ISessionManager _sessionManager;
         private static readonly Logger Logger = new Logger(typeof(Session));
-        private readonly ConcurrentDictionary<IPEndPoint, HostConnectionPool> _connectionPool;
-        private readonly Cluster _cluster;
+        private readonly ConcurrentDictionary<IPEndPoint, IHostConnectionPool> _connectionPool;
+        private readonly IInternalCluster _cluster;
         private int _disposed;
         private volatile string _keyspace;
         private ConcurrentDictionary<string, AsyncLazy<PreparedStatement>> _preparedStatementCache;
-        public int BinaryProtocolVersion { get { return (int)_serializer.ProtocolVersion; } }
+
+        internal IInternalSession InternalRef => this;
+
+        public int BinaryProtocolVersion => (int)_serializer.ProtocolVersion;
 
         /// <inheritdoc />
-        public ICluster Cluster { get { return _cluster; } }
+        public ICluster Cluster => _cluster;
+
+        IInternalCluster IInternalSession.InternalCluster => _cluster;
 
         /// <summary>
         /// Gets the cluster configuration
@@ -54,34 +61,44 @@ namespace Cassandra
         /// <summary>
         /// Determines if the session is already disposed
         /// </summary>
-        public bool IsDisposed
-        {
-            get { return Volatile.Read(ref _disposed) > 0; }
-        }
+        public bool IsDisposed => Volatile.Read(ref _disposed) > 0;
 
         /// <summary>
         /// Gets or sets the keyspace
         /// </summary>
         public string Keyspace
         {
-            get { return _keyspace; }
-            internal set { _keyspace = value; }
+            get => InternalRef.Keyspace;
+            private set => InternalRef.Keyspace = value;
+        }
+
+        /// <summary>
+        /// Gets or sets the keyspace
+        /// </summary>
+        string IInternalSession.Keyspace
+        {
+            get => _keyspace;
+            set => _keyspace = value;
         }
 
         /// <inheritdoc />
         public UdtMappingDefinitions UserDefinedTypes { get; private set; }
 
-        public Policies Policies { get { return Configuration.Policies; } }
+        public Policies Policies => Configuration.Policies;
 
-        internal Session(Cluster cluster, Configuration configuration, string keyspace, Serializer serializer)
+        internal Session(
+            IInternalCluster cluster,
+            Configuration configuration,
+            string keyspace,
+            Serializer serializer)
         {
             _serializer = serializer;
             _cluster = cluster;
             Configuration = configuration;
             Keyspace = keyspace;
             UserDefinedTypes = new UdtMappingDefinitions(this, serializer);
-            _connectionPool = new ConcurrentDictionary<IPEndPoint, HostConnectionPool>();
             _preparedStatementCache=new ConcurrentDictionary<string, AsyncLazy<PreparedStatement>>();
+            _connectionPool = new ConcurrentDictionary<IPEndPoint, IHostConnectionPool>();
         }
 
         /// <inheritdoc />
@@ -192,32 +209,88 @@ namespace Cassandra
             {
                 return;
             }
+
+            _sessionManager?.OnShutdownAsync().GetAwaiter().GetResult();
+
             var hosts = Cluster.AllHosts().ToArray();
             foreach (var host in hosts)
             {
-                HostConnectionPool pool;
-                if (_connectionPool.TryGetValue(host.Address, out pool))
+                if (_connectionPool.TryGetValue(host.Address, out var pool))
                 {
                     pool.Dispose();
                 }
             }
         }
+        
+        /// <inheritdoc />
+        Task IInternalSession.Init()
+        {
+            return InternalRef.Init(null);
+        }
+
+        /// <inheritdoc />
+        async Task IInternalSession.Init(ISessionManager sessionManager)
+        {
+            _sessionManager = sessionManager;
+
+            if (Configuration.GetPoolingOptions(_serializer.ProtocolVersion).GetWarmup())
+            {
+                await Warmup().ConfigureAwait(false);
+            }
+
+            if (Keyspace != null)
+            {
+                // Borrow a connection, trying to fail fast
+                var handler = Configuration.RequestHandlerFactory.Create(this, _serializer);
+                await handler.GetNextConnectionAsync(new Dictionary<IPEndPoint, Exception>()).ConfigureAwait(false);
+            }
+
+            if (_sessionManager != null)
+            {
+                await _sessionManager.OnInitializationAsync().ConfigureAwait(false);
+            }
+        }
 
         /// <summary>
-        /// Initialize the session
+        /// Creates the required connections on all hosts in the local DC.
+        /// Returns a Task that is marked as completed after all pools were warmed up.
+        /// In case, all the host pool warmup fail, it logs an error.
         /// </summary>
-        internal Task Init()
+        private async Task Warmup()
         {
-            var handler = new RequestHandler(this, _serializer);
-            //Borrow a connection, trying to fail fast
-            return handler.GetNextConnection(new Dictionary<IPEndPoint, Exception>());
+            // Load balancing policy was initialized
+            var lbp = Configuration.DefaultRequestOptions.LoadBalancingPolicy;
+            var hosts = lbp.NewQueryPlan(Keyspace, null).Where(h => lbp.Distance(h) == HostDistance.Local).ToArray();
+            var tasks = new Task[hosts.Length];
+            for (var i = 0; i < hosts.Length; i++)
+            {
+                var host = hosts[i];
+                var pool = InternalRef.GetOrCreateConnectionPool(host, HostDistance.Local);
+                tasks[i] = pool.Warmup();
+            }
+
+            try
+            {
+                await Task.WhenAll(tasks).ConfigureAwait(false);
+            }
+            catch
+            {
+                if (tasks.Any(t => t.Status == TaskStatus.RanToCompletion))
+                {
+                    // At least 1 of the warmup tasks completed
+                    return;
+                }
+
+                // Log and continue as the ControlConnection is connected
+                Logger.Error($"Connection pools for {hosts.Length} host(s) failed to be warmed up");
+            }
         }
 
         /// <inheritdoc />
         public RowSet EndExecute(IAsyncResult ar)
         {
             var task = (Task<RowSet>)ar;
-            TaskHelper.WaitToComplete(task, Configuration.ClientOptions.QueryAbortTimeout);
+            TaskHelper.WaitToComplete(task, Configuration.DefaultRequestOptions.QueryAbortTimeout);
             return task.Result;
         }
 
@@ -225,7 +298,15 @@ namespace Cassandra
         public PreparedStatement EndPrepare(IAsyncResult ar)
         {
             var task = (Task<PreparedStatement>)ar;
-            TaskHelper.WaitToComplete(task, Configuration.ClientOptions.QueryAbortTimeout);
+            TaskHelper.WaitToComplete(task, Configuration.DefaultRequestOptions.QueryAbortTimeout);
+            return task.Result;
+        }
+
+        /// <inheritdoc />
+        public RowSet Execute(IStatement statement, string executionProfileName)
+        {
+            var task = ExecuteAsync(statement, executionProfileName);
+            TaskHelper.WaitToComplete(task, Configuration.DefaultRequestOptions.QueryAbortTimeout);
             return task.Result;
         }
 
@@ -233,58 +314,74 @@ namespace Cassandra
         public RowSet Execute(IStatement statement)
         {
             var task = ExecuteAsync(statement);
-            TaskHelper.WaitToComplete(task, Configuration.ClientOptions.QueryAbortTimeout);
+            TaskHelper.WaitToComplete(task, Configuration.DefaultRequestOptions.QueryAbortTimeout);
             return task.Result;
         }
 
         /// <inheritdoc />
         public RowSet Execute(string cqlQuery)
         {
-            return Execute(new SimpleStatement(cqlQuery).SetConsistencyLevel(Configuration.QueryOptions.GetConsistencyLevel()).SetPageSize(Configuration.QueryOptions.GetPageSize()));
+            return Execute(GetDefaultStatement(cqlQuery));
+        }
+
+        /// <inheritdoc />
+        public RowSet Execute(string cqlQuery, string executionProfileName)
+        {
+            return Execute(GetDefaultStatement(cqlQuery), executionProfileName);
         }
 
         /// <inheritdoc />
         public RowSet Execute(string cqlQuery, ConsistencyLevel consistency)
         {
-            return Execute(new SimpleStatement(cqlQuery).SetConsistencyLevel(consistency).SetPageSize(Configuration.QueryOptions.GetPageSize()));
+            return Execute(GetDefaultStatement(cqlQuery).SetConsistencyLevel(consistency));
         }
 
         /// <inheritdoc />
         public RowSet Execute(string cqlQuery, int pageSize)
         {
-            return Execute(new SimpleStatement(cqlQuery).SetConsistencyLevel(Configuration.QueryOptions.GetConsistencyLevel()).SetPageSize(pageSize));
+            return Execute(GetDefaultStatement(cqlQuery).SetPageSize(pageSize));
         }
 
         /// <inheritdoc />
         public Task<RowSet> ExecuteAsync(IStatement statement)
         {
-            return new RequestHandler(this, _serializer, statement).Send();
+            return ExecuteAsync(statement, Configuration.DefaultExecutionProfileName);
         }
 
-        /// <summary>
-        /// Gets or creates the connection pool for a given host
-        /// </summary>
-        internal HostConnectionPool GetOrCreateConnectionPool(Host host, HostDistance distance)
+        /// <inheritdoc />
+        public Task<RowSet> ExecuteAsync(IStatement statement, string executionProfileName)
+        {
+            return InternalRef.ExecuteAsync(statement, InternalRef.GetRequestOptions(executionProfileName));
+        }
+        
+        /// <inheritdoc />
+        Task<RowSet> IInternalSession.ExecuteAsync(IStatement statement, IRequestOptions requestOptions)
+        {
+            return Configuration.RequestHandlerFactory
+                                .Create(this, _serializer, statement, requestOptions)
+                                .SendAsync();
+        }
+        
+        /// <inheritdoc />
+        IHostConnectionPool IInternalSession.GetOrCreateConnectionPool(Host host, HostDistance distance)
         {
             var hostPool = _connectionPool.GetOrAdd(host.Address, address =>
             {
-                var newPool = new HostConnectionPool(host, Configuration, _serializer);
-                newPool.AllConnectionClosed += OnAllConnectionClosed;
+                var newPool = Configuration.HostConnectionPoolFactory.Create(host, Configuration, _serializer);
+                newPool.AllConnectionClosed += InternalRef.OnAllConnectionClosed;
                 newPool.SetDistance(distance);
                 return newPool;
             });
             return hostPool;
         }
 
-        /// <summary>
-        /// Gets a snapshot of the connection pools
-        /// </summary>
-        internal KeyValuePair<IPEndPoint, HostConnectionPool>[] GetPools()
+        /// <inheritdoc />
+        IEnumerable<KeyValuePair<IPEndPoint, IHostConnectionPool>> IInternalSession.GetPools()
         {
-            return _connectionPool.ToArray();
+            return _connectionPool.ToArray().Select(kvp => new KeyValuePair<IPEndPoint, IHostConnectionPool>(kvp.Key, kvp.Value));
         }
 
-        internal void OnAllConnectionClosed(Host host, HostConnectionPool pool)
+        void IInternalSession.OnAllConnectionClosed(Host host, IHostConnectionPool pool)
         {
             if (_cluster.AnyOpenConnections(host))
             {
@@ -292,10 +389,10 @@ namespace Cassandra
                 return;
             }
             // There isn't any open connection to this host in any of the pools
-            MarkAsDownAndScheduleReconnection(host, pool);
+            InternalRef.MarkAsDownAndScheduleReconnection(host, pool);
         }
 
-        internal void MarkAsDownAndScheduleReconnection(Host host, HostConnectionPool pool)
+        void IInternalSession.MarkAsDownAndScheduleReconnection(Host host, IHostConnectionPool pool)
         {
             // By setting the host as down, all pools should cancel any outstanding reconnection attempt
             if (host.SetDown())
@@ -305,30 +402,25 @@ namespace Cassandra
             }
         }
 
-        internal bool HasConnections(Host host)
+        bool IInternalSession.HasConnections(Host host)
         {
-            HostConnectionPool pool;
-            if (_connectionPool.TryGetValue(host.Address, out pool))
+            if (_connectionPool.TryGetValue(host.Address, out var pool))
             {
                 return pool.HasConnections;
             }
             return false;
         }
 
-        /// <summary>
-        /// Gets the existing connection pool for this host and session or null when it does not exists
-        /// </summary>
-        internal HostConnectionPool GetExistingPool(IPEndPoint address)
+        /// <inheritdoc />
+        IHostConnectionPool IInternalSession.GetExistingPool(IPEndPoint address)
         {
-            HostConnectionPool pool;
-            _connectionPool.TryGetValue(address, out pool);
+            _connectionPool.TryGetValue(address, out var pool);
             return pool;
         }
 
-        internal void CheckHealth(Connection connection)
+        void IInternalSession.CheckHealth(IConnection connection)
         {
-            HostConnectionPool pool;
-            if (!_connectionPool.TryGetValue(connection.Address, out pool))
+            if (!_connectionPool.TryGetValue(connection.Address, out var pool))
             {
                 Logger.Error("Internal error: No host connection pool found");
                 return;
@@ -336,42 +428,60 @@ namespace Cassandra
             pool.CheckHealth(connection);
         }
 
+        /// <inheritdoc />
         public PreparedStatement Prepare(string cqlQuery)
         {
             return Prepare(cqlQuery, null);
         }
-
+        
+        /// <inheritdoc />
         public PreparedStatement Prepare(string cqlQuery, IDictionary<string, byte[]> customPayload)
         {
             var task = PrepareAsync(cqlQuery, customPayload);
-            TaskHelper.WaitToComplete(task, Configuration.ClientOptions.QueryAbortTimeout);
+            TaskHelper.WaitToComplete(task, Configuration.DefaultRequestOptions.QueryAbortTimeout);
             return task.Result;
         }
-
+        
         /// <inheritdoc />
         public Task<PreparedStatement> PrepareAsync(string query)
         {
             return PrepareAsync(query, null);
         }
-
+        
         /// <inheritdoc />
         public async Task<PreparedStatement> PrepareAsync(string query, IDictionary<string, byte[]> customPayload)
         {
-            var request = new PrepareRequest(query)
+            var request = new InternalPrepareRequest(query)
             {
                 Payload = customPayload
             };
-            return await PrepareHandler.Prepare(this, _serializer, request).ConfigureAwait(false);
-        }
 
+            return await _cluster.Prepare(this, _serializer, request).ConfigureAwait(false);
+        }
+        
         public void WaitForSchemaAgreement(RowSet rs)
         {
-            
         }
 
         public bool WaitForSchemaAgreement(IPEndPoint hostAddress)
         {
             return false;
+        }
+
+        private IStatement GetDefaultStatement(string cqlQuery)
+        {
+            return new SimpleStatement(cqlQuery);
+        }
+
+        /// <inheritdoc />
+        IRequestOptions IInternalSession.GetRequestOptions(string executionProfileName)
+        {
+            if (!Configuration.RequestOptions.TryGetValue(executionProfileName, out var profile))
+            {
+                throw new ArgumentException("The provided execution profile name does not exist. It must be added through the Cluster Builder.");
+            }
+
+            return profile;
         }
     }
 }

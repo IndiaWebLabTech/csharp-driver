@@ -1,5 +1,5 @@
 //
-//      Copyright (C) 2012-2014 DataStax Inc.
+//      Copyright (C) DataStax Inc.
 //
 //   Licensed under the Apache License, Version 2.0 (the "License");
 //   you may not use this file except in compliance with the License.
@@ -40,7 +40,7 @@ namespace Cassandra.IntegrationTests.Core
                                            .AddContactPoints("1.1.1.1") // IP address that drops (not rejects !) the inbound connection
                                            .WithSocketOptions(new SocketOptions().SetConnectTimeoutMillis(700));
                 var cluster = builder.Build();
-                await Connect(cluster, asyncConnection, session =>{});
+                await Connect(cluster, asyncConnection, session =>{}).ConfigureAwait(false);
                 Assert.Fail();
             }
             catch (NoHostAvailableException)

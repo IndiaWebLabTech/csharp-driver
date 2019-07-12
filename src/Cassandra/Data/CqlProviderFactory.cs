@@ -1,5 +1,5 @@
 ﻿//
-//      Copyright (C) 2012-2014 DataStax Inc.
+//      Copyright (C) DataStax Inc.
 //
 //   Licensed under the Apache License, Version 2.0 (the "License");
 //   you may not use this file except in compliance with the License.
@@ -52,7 +52,7 @@ namespace Cassandra.Data
             throw new NotSupportedException();
         }
 
-#if !NETCORE
+#if NET45
         public override bool CanCreateDataSourceEnumerator
         {
             get { return false; }

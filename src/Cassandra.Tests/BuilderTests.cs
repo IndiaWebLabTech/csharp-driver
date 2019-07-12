@@ -2,8 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
-using System.Net.Sockets;
-using System.Text;
+
 using NUnit.Framework;
 
 namespace Cassandra.Tests
@@ -84,17 +83,17 @@ namespace Cassandra.Tests
         [Test]
         public void AddContactPointsWithPortShouldHaveCorrectPort()
         {
-        	const string host1 = "127.0.0.1";
-        	const string host2 = "127.0.0.2";
-        	
-        	int port = new Random().Next(9000, 9999);
-        	var builder = Cluster.Builder().AddContactPoint(host1).WithPort(port);
-        	var cluster = builder.Build();
-        	Assert.AreEqual( cluster.AllHosts().Last().Address.Port, port);
-        	
-        	builder = Cluster.Builder().AddContactPoints(host1, host2).WithPort(port);
-        	cluster = builder.Build();
-        	Assert.True( cluster.AllHosts().All(h => h.Address.Port == port));
+            const string host1 = "127.0.0.1";
+            const string host2 = "127.0.0.2";
+
+            int port = new Random().Next(9000, 9999);
+            var builder = Cluster.Builder().AddContactPoint(host1).WithPort(port);
+            var cluster = builder.Build();
+            Assert.AreEqual(cluster.AllHosts().Last().Address.Port, port);
+
+            builder = Cluster.Builder().AddContactPoints(host1, host2).WithPort(port);
+            cluster = builder.Build();
+            Assert.True(cluster.AllHosts().All(h => h.Address.Port == port));
         }
 
         [Test]
@@ -126,6 +125,27 @@ namespace Cassandra.Tests
             builder = Cluster.Builder().WithPort(port).AddContactPoints(host1, host2);
             cluster = builder.Build();
             Assert.True(cluster.AllHosts().All(h => h.Address.Port == port));
+        }
+        
+        [Test]
+        public void Should_SetResolvedContactPoints_When_ClusterIsBuilt()
+        {
+            const string host1 = "127.0.0.1";
+            const string host2 = "127.0.0.2";
+            const string host3 = "localhost";
+            
+            var builder = Cluster.Builder().AddContactPoints(host1, host2, host3);
+            var cluster = builder.Build();
+            Assert.AreEqual(3, cluster.GetResolvedEndpoints().Count);
+            CollectionAssert.AreEqual(
+                new[] { new IPEndPoint(IPAddress.Parse(host1), ProtocolOptions.DefaultPort) }, 
+                cluster.GetResolvedEndpoints()[host1]);
+            CollectionAssert.AreEqual(
+                new[] { new IPEndPoint(IPAddress.Parse(host2), ProtocolOptions.DefaultPort) }, 
+                cluster.GetResolvedEndpoints()[host2]);
+
+            var localhostAddress = new IPEndPoint(IPAddress.Parse("127.0.0.1"), ProtocolOptions.DefaultPort);
+            Assert.Contains(localhostAddress, cluster.GetResolvedEndpoints()[host3].ToList());
         }
 
         [Test]
@@ -170,7 +190,7 @@ namespace Cassandra.Tests
         [Test]
         [TestCase(ProtocolVersion.MaxSupported, 1, 2)]
         [TestCase(ProtocolVersion.V2, 2, 8)]
-        public void PoolingOptions_Create_Based_On_Protocol_Version(ProtocolVersion protocolVersion, 
+        public void PoolingOptions_Create_Based_On_Protocol_Version(ProtocolVersion protocolVersion,
             int coreConnections, int maxConnections)
         {
             var options1 = PoolingOptions.Create(protocolVersion);
@@ -243,7 +263,38 @@ namespace Cassandra.Tests
 
             // Only IPEndPoint instances as IP addresses and host names must be resolved and assigned
             // the port number, which is performed on Build()
-            Assert.AreEqual(new [] { endpoint1, endpoint2 }, builder.ContactPoints);
+            Assert.AreEqual(new[] { endpoint1, endpoint2 }, builder.ContactPoints);
+        }
+
+        [Test]
+        [TestCase(0)]
+        [TestCase(-1)]
+        public void Should_ThrowArgumentException_When_ProvidedMaxSchemaAgreementsWaitSecondsIsInvalid(int seconds)
+        {
+            var builder = Cluster.Builder();
+            var ex = Assert.Throws<ArgumentException>(() => builder.WithMaxSchemaAgreementWaitSeconds(seconds));
+            Assert.That(ex.Message, Is.EqualTo("Max schema agreement wait must be greater than zero"));
+        }
+
+        [Test]
+        public void Should_ReturnCorrectMaxSchemaAgreementsWaitSeconds_When_ValueIsProvidedToBuilder()
+        {
+            var expected = 20;
+            var config = Cluster.Builder()
+                                 .AddContactPoint("192.168.1.10")
+                                 .WithMaxSchemaAgreementWaitSeconds(expected)
+                                 .GetConfiguration();
+            Assert.AreEqual(expected, config.ProtocolOptions.MaxSchemaAgreementWaitSeconds);
+        }
+
+        [Test]
+        public void Should_ReturnDefaultMaxSchemaAgreementWaitSeconds_When_NotProvidedToBuilder()
+        {
+            var expected = ProtocolOptions.DefaultMaxSchemaAgreementWaitSeconds;
+            var config = Cluster.Builder()
+                                 .AddContactPoint("192.168.1.10")
+                                 .GetConfiguration();
+            Assert.AreEqual(expected, config.ProtocolOptions.MaxSchemaAgreementWaitSeconds);
         }
     }
 }

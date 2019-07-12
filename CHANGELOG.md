@@ -1,5 +1,97 @@
 # ChangeLog - DataStax C# Driver
 
+## 3.10.1
+
+2019-06-17
+
+### Bug Fixes
+
+- [CSHARP-772] - Remove internal conversion of timestmap to DateTimeOffset
+- [CSHARP-777] - Invalid or unsupported protocol version (0)
+
+## 3.10.0
+
+2019-05-21
+
+### Features
+
+- [CSHARP-275] - Prevent duplicate metadata fetches from control connection and allow disabling schema metadata fetching
+- [CSHARP-763] - Introduce Execution Profiles in Mapper and LINQ APIs
+- [CSHARP-678] - Introduce Execution Profiles at Session Level
+- [CSHARP-424] - Allow UDT mappings to be defined for different keyspaces
+
+### Bug Fixes
+
+- [CSHARP-744] - LINQ and Mapper don't support empty column names
+- [CSHARP-766] - Cassandra Date is not mapped correct to LocalDate with some specfic values
+
+## 3.9.0
+
+2019-04-02
+
+### Features
+
+- [CSHARP-538] - Expose Metadata.CheckSchemaAgreement() and ExecutionInfo.IsSchemaInAgreement()
+- [CSHARP-618] - Add client configuration information to STARTUP message
+- [CSHARP-725] - Deprecate usedHostsPerRemoteDc in DCAwareRoundRobinPolicy
+
+### Bug Fixes
+
+- [CSHARP-708] - Retry on current host should be made on a different connection
+- [CSHARP-715] - LocalTime Parse fails for valid LocalTime strings on certain cultures
+- [CSHARP-752] - Memory leak in ControlConnection
+
+## 3.8.0
+
+2019-02-11
+
+### Features
+
+- [CSHARP-726] - Improvements to token map building process
+
+## 3.7.0
+
+2018-11-26
+
+### Features
+
+- [CSHARP-705] - Provide a means of sending query to a specific node to facilitate virtual table queries
+- [CSHARP-706] - Parse Virtual Keyspace Metadata
+
+### Bug Fixes
+
+- [CSHARP-709] - Rarely occurring concurrency bug in the HashedWheelTimer class
+
+## 3.6.0
+
+2018-06-18
+
+### Features
+
+- [CSHARP-591] - EC2 multi-region address resolution policy
+- [CSHARP-625] - Mark DowngradingConsistencyRetryPolicy as deprecated
+- [CSHARP-634] - Use system.peers in protocol negotiation
+- [CSHARP-669] - Support pool warmup on initialization and enable it by default
+- [CSHARP-680] - Use OPTIONS message for heartbeats instead of 'select key from system.local'
+- [CSHARP-335] - RowSet: Support concurrent asynchronous calls to fetch next page
+- [CSHARP-681] - Log driver version on Connect
+
+### Bug Fixes
+
+- [CSHARP-631] - BatchStatement: Use routing key from first statement
+- [CSHARP-660] - Linq: StatementFactory shouldn't cache failed prepared statements
+- [CSHARP-667] - Mapper: Statement factory cache should use keyspace to uniquely identify the query
+- [CSHARP-691] - Sync completion of socket.ConnectAsync() is not considered
+
+## 3.5.0
+
+2018-04-17
+
+### Features
+
+- [CSHARP-636] - Add NO_COMPACT startup option
+- [CSHARP-649] - Limit the write queue size at connection level
+
 ## 3.4.1
 
 2018-02-26

@@ -1,5 +1,5 @@
 //
-//      Copyright (C) 2012-2014 DataStax Inc.
+//      Copyright (C) DataStax Inc.
 //
 //   Licensed under the Apache License, Version 2.0 (the "License");
 //   you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ using Moq;
 using System.Threading.Tasks;
 using System.Threading;
 ﻿using Cassandra.Requests;
+#pragma warning disable 618
 
 namespace Cassandra.Tests
 {
@@ -423,7 +424,7 @@ namespace Cassandra.Tests
         public void DowngradingConsistencyRetryTest()
         {
             var config = new Configuration();
-            var policy = DowngradingConsistencyRetryPolicy.Instance.Wrap(null);
+            var policy = DowngradingConsistencyRetryPolicy.Instance.Wrap(Policies.DefaultExtendedRetryPolicy);
             var dummyStatement = new SimpleStatement().SetRetryPolicy(policy);
             //Retry if 1 of 2 replicas are alive
             var decision = RequestExecution.GetRetryDecision(

@@ -1,23 +1,21 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <Description>A modern, feature-rich and highly tunable C# client library for Apache Cassandra and DataStax Enterprise.
-We have added multitenacy support for POCO Part.</Description>
-    <Copyright>Copyright © 2017 by DataStax</Copyright>
+    <Description>A modern, feature-rich and highly tunable C# client library for Apache Cassandra and DataStax Enterprise.We have added multitenacy support for POCO Part.</Description>
+    <Copyright>Copyright © 2018 by DataStax</Copyright>
     <AssemblyTitle>DataStax C# Driver for Apache Cassandra</AssemblyTitle>
     <AssemblyVersion>3.99.0.0</AssemblyVersion>
-    <FileVersion>3.4.1.0</FileVersion>
-    <VersionPrefix>3.4.1</VersionPrefix>
+    <FileVersion>3.10.1.0</FileVersion>
+    <VersionPrefix>3.10.1</VersionPrefix>
     <Authors>Mukesh Rebari</Authors>
-    <!--<TargetFrameworks>net46;netstandard2.0</TargetFrameworks>-->
-    <TargetFramework>netcoreapp2.0</TargetFramework>
-    <LangVersion>7.1</LangVersion>
+    <TargetFrameworks Condition="'$(BuildCoreOnly)' != 'True'">net45;netstandard1.5;netstandard2.0</TargetFrameworks>
+    <TargetFrameworks Condition="'$(BuildCoreOnly)' == 'True'">netstandard1.5;netstandard2.0</TargetFrameworks>
     <NoWarn>$(NoWarn);1591</NoWarn>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <AssemblyName>Cassandra</AssemblyName>
     <Product>Unofficial DataStax C# Driver for Apache Cassandra</Product>
     <AssemblyOriginatorKeyFile>../../build/datastax.snk</AssemblyOriginatorKeyFile>
-    <SignAssembly>false</SignAssembly>
+    <SignAssembly>true</SignAssembly>
     <PublicSign Condition="'$(OS)' != 'Windows_NT'">true</PublicSign>
     <PackageId>CassandraCSharpDriver_IWLT</PackageId>
     <Title>DataStax C# Driver for Apache Cassandra</Title>
@@ -25,23 +23,25 @@ We have added multitenacy support for POCO Part.</Description>
     <PackageLicenseUrl>https://github.com/datastax/csharp-driver/blob/master/LICENSE</PackageLicenseUrl>
     <RepositoryUrl>https://github.com/IndiaWebLabTech/csharp-driver</RepositoryUrl>
     <PackageProjectUrl>https://github.com/IndiaWebLabTech/csharp-driver</PackageProjectUrl>
-    <NetStandardImplicitPackageVersion>2.0.0</NetStandardImplicitPackageVersion>
-    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <Company>India WebLab Technologies (P) Ltd.</Company>
-    <Version>3.3.2.3</Version>
+    <Version>3.10.1</Version>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(TargetFramework)' == 'net45' ">
+    <NetStandardImplicitPackageVersion>2.0.0</NetStandardImplicitPackageVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(TargetFramework)' == 'netstandard1.5' ">
+    <DefineConstants>$(DefineConstants);NETCORE</DefineConstants>
+    <NetStandardImplicitPackageVersion>1.6.0</NetStandardImplicitPackageVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(TargetFramework)' == 'netstandard2.0' ">
+    <DefineConstants>$(DefineConstants);NETCORE</DefineConstants>
+    <NetStandardImplicitPackageVersion>2.0.0</NetStandardImplicitPackageVersion>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="lz4net" Version="1.0.15.93" />
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="2.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="2.0.0" />
-    <PackageReference Include="System.Data.Common" Version="4.3.0" />
-    <PackageReference Include="System.Diagnostics.StackTrace" Version="4.3.0" />
-    <PackageReference Include="System.Diagnostics.TraceSource" Version="4.3.0" />
-    <PackageReference Include="System.Net.NameResolution" Version="4.3.0" />
-    <PackageReference Include="System.Net.Security" Version="4.3.2" />
-    <PackageReference Include="System.Runtime.Serialization.Primitives" Version="4.3.0" />
-    <PackageReference Include="System.Threading.Thread" Version="4.3.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="1.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="1.0.0" />
+    <PackageReference Include="System.Threading.Tasks.Dataflow" Version="[4.6.0,5.0)" />
   </ItemGroup>
   <ItemGroup Condition=" '$(TargetFramework)' == 'net46' ">
     <PackageReference Include="lz4net" Version="1.0.10.93" />
@@ -51,11 +51,9 @@ We have added multitenacy support for POCO Part.</Description>
     <Reference Include="System" />
     <Reference Include="Microsoft.CSharp" />
   </ItemGroup>
-  <PropertyGroup Condition=" '$(TargetFramework)' == 'netstandard1.5' ">
-    <DefineConstants>$(DefineConstants);NETCORE</DefineConstants>
-  </PropertyGroup>
   <ItemGroup Condition=" '$(TargetFramework)' == 'netstandard2.0' ">
     <PackageReference Include="System.Data.Common" Version="4.1.0" />
+    <PackageReference Include="System.Diagnostics.FileVersionInfo" Version="4.0.0" />
     <PackageReference Include="System.Diagnostics.StackTrace" Version="4.0.1" />
     <PackageReference Include="System.Diagnostics.TraceSource" Version="4.0.0" />
     <PackageReference Include="System.Net.NameResolution" Version="4.0.0" />

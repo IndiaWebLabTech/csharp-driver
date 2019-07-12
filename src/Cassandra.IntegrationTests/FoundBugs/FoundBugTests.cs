@@ -1,5 +1,5 @@
 ﻿//
-//      Copyright (C) 2012-2014 DataStax Inc.
+//      Copyright (C) DataStax Inc.
 //
 //   Licensed under the Apache License, Version 2.0 (the "License");
 //   you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ using NUnit.Framework;
 
 namespace Cassandra.IntegrationTests.FoundBugs
 {
-    [TestFixture, Category("long")]
+    [TestFixture, Category("long"), Ignore("tests that are not marked with 'short' need to be refactored/deleted")]
     public class FoundBugTests : TestGlobals
     {
         [Test]

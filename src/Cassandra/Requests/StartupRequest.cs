@@ -1,5 +1,5 @@
 ﻿//
-//      Copyright (C) 2012-2014 DataStax Inc.
+//      Copyright (C) DataStax Inc.
 //
 //   Licensed under the Apache License, Version 2.0 (the "License");
 //   you may not use this file except in compliance with the License.
@@ -14,8 +14,10 @@
 //   limitations under the License.
 //
 
+using System;
 using System.Collections.Generic;
 using System.IO;
+
 using Cassandra.Serialization;
 
 namespace Cassandra.Requests
@@ -23,42 +25,18 @@ namespace Cassandra.Requests
     internal class StartupRequest : IRequest
     {
         public const byte OpCode = 0x01;
-        private readonly IDictionary<string, string> _options;
+        private readonly IReadOnlyDictionary<string, string> _options;
 
-        public StartupRequest(CompressionType compression, bool noCompact)
+        public StartupRequest(IReadOnlyDictionary<string, string> startupOptions)
         {
-            _options = new Dictionary<string, string>
-            {
-                {"CQL_VERSION", "3.0.0"}
-            };
-
-            string compressionName = null;
-            switch (compression)
-            {
-                case CompressionType.LZ4:
-                    compressionName = "lz4";
-                    break;
-                case CompressionType.Snappy:
-                    compressionName = "snappy";
-                    break;
-            }
-
-            if (compressionName != null)
-            {
-                _options.Add("COMPRESSION", compressionName);
-            }
-
-            if (noCompact)
-            {
-                _options.Add("NO_COMPACT", "true");
-            }
+            _options = startupOptions ?? throw new ArgumentNullException(nameof(startupOptions));
         }
 
         public int WriteFrame(short streamId, MemoryStream stream, Serializer serializer)
         {
             var wb = new FrameWriter(stream, serializer);
-            wb.WriteFrameHeader(0x00, streamId, OpCode);
-            wb.WriteUInt16((ushort) _options.Count);
+            wb.WriteFrameHeader(0x00, streamId, StartupRequest.OpCode);
+            wb.WriteUInt16((ushort)_options.Count);
             foreach (var kv in _options)
             {
                 wb.WriteString(kv.Key);

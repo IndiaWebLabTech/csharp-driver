@@ -1,5 +1,5 @@
 ﻿//
-//      Copyright (C) 2012-2014 DataStax Inc.
+//      Copyright (C) DataStax Inc.
 //
 //   Licensed under the Apache License, Version 2.0 (the "License");
 //   you may not use this file except in compliance with the License.
@@ -159,7 +159,7 @@ namespace Cassandra.Data.Linq
         /// </summary>
         private string Escape(string identifier)
         {
-            if (!_pocoData.CaseSensitive)
+            if (!_pocoData.CaseSensitive && !string.IsNullOrWhiteSpace(identifier))
             {
                 return identifier;
             }
@@ -1139,6 +1139,12 @@ namespace Cassandra.Data.Linq
         private static object GetPropertyValue(MemberExpression node)
         {
             var propertyInfo = (PropertyInfo)node.Member;
+
+            if (node.Expression == null)
+            {
+                return propertyInfo.GetValue(null);
+            }
+
             if (node.Expression is MemberExpression)
             {
                 // Field property

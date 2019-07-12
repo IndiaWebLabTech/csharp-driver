@@ -1,5 +1,5 @@
 //
-//      Copyright (C) 2012-2014 DataStax Inc.
+//      Copyright (C) DataStax Inc.
 //
 //   Licensed under the Apache License, Version 2.0 (the "License");
 //   you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ namespace Cassandra
     /// <summary>
     /// Top level class for exceptions thrown by the driver.
     /// </summary>
-#if !NETCORE
+#if NET45
     [Serializable]
 #endif
     public class DriverException : Exception
@@ -37,7 +37,7 @@ namespace Cassandra
         {
         }
 
-#if !NETCORE
+#if NET45
         protected DriverException(SerializationInfo info, StreamingContext context) :
             base(info, context)
         {

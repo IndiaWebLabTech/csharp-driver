@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using Cassandra.IntegrationTests.TestBase;
 using Cassandra.IntegrationTests.TestClusterManagement;
 using NUnit.Framework;
@@ -60,31 +62,38 @@ namespace Cassandra.IntegrationTests
         /// </summary>
         protected string KeyspaceName { get; set; }
 
-        /// <summary>
-        /// Determines if we are running on AppVeyor.
-        /// </summary>
-        protected static bool IsAppVeyor => !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("APPVEYOR"));
+        protected TestClusterOptions Options { get; set; }
 
-        protected SharedClusterTest(int amountOfNodes = 1, bool createSession = true, bool reuse = true)
+        protected SharedClusterTest(int amountOfNodes = 1, bool createSession = true, bool reuse = true, TestClusterOptions options = null)
         {
             //only reuse single node clusters
             _reuse = reuse && amountOfNodes == 1;
             AmountOfNodes = amountOfNodes;
             KeyspaceName = TestUtils.GetUniqueKeyspaceName().ToLowerInvariant();
             CreateSession = createSession;
+            Options = options;
         }
 
         [OneTimeSetUp]
         public virtual void OneTimeSetUp()
         {
-            if (_reuse && _reusableInstance != null && ReferenceEquals(_reusableInstance, TestClusterManager.LastInstance))
+            CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
+            CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
+
+            Thread.CurrentThread.CurrentUICulture = CultureInfo.InvariantCulture;
+            Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
+
+            if (_reuse && _reusableInstance != null 
+                       && ReferenceEquals(_reusableInstance, TestClusterManager.LastInstance)
+                       && ((Options != null && Options.Equals(TestClusterManager.LastOptions)) || (Options == null && TestClusterManager.LastOptions == null))
+                       && AmountOfNodes == TestClusterManager.LastAmountOfNodes)
             {
-                Trace.WriteLine("Reusing single node ccm instance");
+                Trace.WriteLine("Reusing ccm instance");
                 TestCluster = _reusableInstance;
             }
             else
             {
-                TestCluster = TestClusterManager.CreateNew(AmountOfNodes);
+                TestCluster = TestClusterManager.CreateNew(AmountOfNodes, Options);
                 if (_reuse)
                 {
                     _reusableInstance = TestCluster;
@@ -132,9 +141,11 @@ namespace Cassandra.IntegrationTests
             return GetNewCluster().Connect(keyspace);
         }
 
-        protected Cluster GetNewCluster()
+        protected Cluster GetNewCluster(Action<Builder> build = null)
         {
-            var cluster = Cluster.Builder().AddContactPoint(TestCluster.InitialContactPoint).Build();
+            var builder = Cluster.Builder().AddContactPoint(TestCluster.InitialContactPoint);
+            build?.Invoke(builder);
+            var cluster = builder.Build();
             _clusterInstances.Add(cluster);
             return cluster;
         }

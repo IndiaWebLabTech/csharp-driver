@@ -1,11 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using Cassandra.IntegrationTests.TestBase;
 using Cassandra.IntegrationTests.TestClusterManagement;
+using Cassandra.SessionManagement;
+using Cassandra.Tests;
 using NUnit.Framework;
 
 namespace Cassandra.IntegrationTests.Core
@@ -108,7 +111,7 @@ namespace Cassandra.IntegrationTests.Core
                     Assert.AreEqual(2, session.BinaryProtocolVersion);
                 else
                     Assert.AreEqual(3, session.BinaryProtocolVersion);
-            });
+            }).ConfigureAwait(false);
             
             // Arbitary MaxProtocolVersion set, will negotiate down upon connect
             var clusterNegotiate = Cluster.Builder()
@@ -119,7 +122,7 @@ namespace Cassandra.IntegrationTests.Core
             await Connect(clusterNegotiate, asyncConnect, session =>
             {
                 Assert.LessOrEqual(4, clusterNegotiate.Configuration.ProtocolOptions.MaxProtocolVersion);
-            });
+            }).ConfigureAwait(false);
 
             // ProtocolVersion 0 does not exist
             Assert.Throws<ArgumentException>(
@@ -141,24 +144,35 @@ namespace Cassandra.IntegrationTests.Core
             {
                 Assert.AreEqual(1, cluster.AllHosts().Count);
                 _testCluster.BootstrapNode(2);
-                var queried = false;
                 Trace.TraceInformation("Node bootstrapped");
-                Thread.Sleep(10000);
                 var newNodeAddress = _testCluster.ClusterIpPrefix + 2;
-                Assert.True(TestUtils.IsNodeReachable(IPAddress.Parse(newNodeAddress)));
-                //New node should be part of the metadata
-                Assert.AreEqual(2, cluster.AllHosts().Count);
-                for (var i = 0; i < 10; i++)
-                {
-                    var rs = session.Execute("SELECT key FROM system.local");
-                    if (rs.Info.QueriedHost.Address.ToString() == newNodeAddress)
+                var newNodeIpAddress = IPAddress.Parse(newNodeAddress);
+                TestHelper.RetryAssert(() =>
                     {
-                        queried = true;
-                        break;
-                    }
-                }
-                Assert.True(queried, "Newly bootstrapped node should be queried");
-            });
+                        Assert.True(TestUtils.IsNodeReachable(newNodeIpAddress));
+                        //New node should be part of the metadata
+                        Assert.AreEqual(2, cluster.AllHosts().Count);
+                    },
+                    2000, 
+                    30);
+
+                TestHelper.RetryAssert(() =>
+                {
+                    var host = cluster.AllHosts().FirstOrDefault(h => h.Address.Address.Equals(newNodeIpAddress));
+                    Assert.IsNotNull(host);
+                    var count = host.Tokens?.Count();
+                    Assert.IsTrue(count.HasValue);
+                    Assert.IsTrue(count.Value > 0, "Tokens Count: " + count);
+                });
+                
+                TestHelper.RetryAssert(() =>
+                    {
+                        var rs = session.Execute("SELECT key FROM system.local");
+                        Assert.True(rs.Info.QueriedHost.Address.ToString() == newNodeAddress, "Newly bootstrapped node should be queried");
+                    },
+                    1, 
+                    100);
+            }).ConfigureAwait(false);
         }
 
         [Test]
@@ -189,7 +203,7 @@ namespace Cassandra.IntegrationTests.Core
                     }
                 }
                 Assert.False(queried, "Removed node should be queried");
-            });
+            }).ConfigureAwait(false);
         }
 
         private class TestLoadBalancingPolicy : ILoadBalancingPolicy
@@ -200,7 +214,7 @@ namespace Cassandra.IntegrationTests.Core
             public void Initialize(ICluster cluster)
             {
                 _cluster = cluster;
-                ControlConnectionHost = ((Cluster)cluster).GetControlConnection().Host;
+                ControlConnectionHost = ((IInternalCluster)cluster).GetControlConnection().Host;
             }
 
             public HostDistance Distance(Host host)

@@ -1,5 +1,5 @@
 ﻿//
-//      Copyright (C) 2012-2017 DataStax Inc.
+//      Copyright (C) DataStax Inc.
 //
 //   Licensed under the Apache License, Version 2.0 (the "License");
 //   you may not use this file except in compliance with the License.
@@ -40,6 +40,11 @@ namespace Cassandra.IntegrationTests.TestBase
         public string CassandraVersionStr => TestClusterManager.CassandraVersionText;
 
         public Version CassandraVersion => TestClusterManager.CassandraVersion;
+
+        /// <summary>
+        /// Determines if we are running on AppVeyor.
+        /// </summary>
+        protected static bool IsAppVeyor => !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("APPVEYOR"));
 
         /// <summary>
         /// Gets the latest protocol version depending on the Cassandra Version running the tests
@@ -172,13 +177,13 @@ namespace Cassandra.IntegrationTests.TestBase
             {
                 try
                 {
-                    var session = await cluster.ConnectAsync();
+                    var session = await cluster.ConnectAsync().ConfigureAwait(false);
                     action(session);
                 }
                 finally
                 {
                     var shutdownAsync = cluster?.ShutdownAsync();
-                    if (shutdownAsync != null) await shutdownAsync;
+                    if (shutdownAsync != null) await shutdownAsync.ConfigureAwait(false);
                 }
             }
             else

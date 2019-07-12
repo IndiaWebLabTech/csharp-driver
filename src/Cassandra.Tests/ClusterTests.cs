@@ -1,5 +1,5 @@
 //
-//      Copyright (C) 2012-2014 DataStax Inc.
+//      Copyright (C) DataStax Inc.
 //
 //   Licensed under the Apache License, Version 2.0 (the "License");
 //   you may not use this file except in compliance with the License.
@@ -82,8 +82,8 @@ namespace Cassandra.Tests
                     Assert.AreEqual(1, ex.Errors.Count);
                 }
                 GC.Collect();
-                Assert.Less(GC.GetTotalMemory(true) / initialLength, 1.2M,
-                    "Should not exceed a 20% (1.2) more than was previously allocated");
+                Assert.Less(GC.GetTotalMemory(true) / initialLength, 1.3M,
+                    "Should not exceed a 20% (1.3) more than was previously allocated");
             }
         }
     }

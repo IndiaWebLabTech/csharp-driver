@@ -1,5 +1,5 @@
 //
-//      Copyright (C) 2012-2014 DataStax Inc.
+//      Copyright (C) DataStax Inc.
 //
 //   Licensed under the Apache License, Version 2.0 (the "License");
 //   you may not use this file except in compliance with the License.
@@ -14,8 +14,6 @@
 //   limitations under the License.
 //
 
-using Cassandra.IntegrationTests.TestBase;
-using NUnit.Framework;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -25,13 +23,19 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
-using Cassandra.Tasks;
-using Cassandra.Tests;
+using Cassandra.Connections;
+using Cassandra.ExecutionProfiles;
+using Cassandra.IntegrationTests.TestBase;
 using Cassandra.Requests;
 using Cassandra.Responses;
 using Cassandra.Serialization;
-using Microsoft.IO;
+using Cassandra.SessionManagement;
+using Cassandra.Tasks;
+using Cassandra.Tests;
+
 using Moq;
+
+using NUnit.Framework;
 
 namespace Cassandra.IntegrationTests.Core
 {
@@ -86,7 +90,7 @@ namespace Cassandra.IntegrationTests.Core
             using (var connection = CreateConnection())
             {
                 connection.Open().Wait();
-                var request = new PrepareRequest(BasicQuery);
+                var request = new InternalPrepareRequest(BasicQuery);
                 var task = connection.Send(request);
                 task.Wait();
                 Assert.AreEqual(TaskStatus.RanToCompletion, task.Status);
@@ -100,7 +104,7 @@ namespace Cassandra.IntegrationTests.Core
             using (var connection = CreateConnection())
             {
                 connection.Open().Wait();
-                var request = new PrepareRequest("SELECT WILL FAIL");
+                var request = new InternalPrepareRequest("SELECT WILL FAIL");
                 var task = connection.Send(request);
                 task.ContinueWith(t =>
                 {
@@ -119,10 +123,10 @@ namespace Cassandra.IntegrationTests.Core
                 connection.Open().Wait();
 
                 //Prepare a query
-                var prepareRequest = new PrepareRequest(BasicQuery);
+                var prepareRequest = new InternalPrepareRequest(BasicQuery);
                 var task = connection.Send(prepareRequest);
                 var prepareOutput = ValidateResult<OutputPrepared>(task.Result);
-                
+
                 //Execute the prepared query
                 var executeRequest = new ExecuteRequest(GetProtocolVersion(), prepareOutput.QueryId, null, false, QueryProtocolOptions.Default);
                 task = connection.Send(executeRequest);
@@ -141,7 +145,7 @@ namespace Cassandra.IntegrationTests.Core
             {
                 connection.Open().Wait();
 
-                var prepareRequest = new PrepareRequest("SELECT * FROM system.local WHERE key = ?");
+                var prepareRequest = new InternalPrepareRequest("SELECT * FROM system.local WHERE key = ?");
                 var task = connection.Send(prepareRequest);
                 var prepareOutput = ValidateResult<OutputPrepared>(task.Result);
 
@@ -157,7 +161,8 @@ namespace Cassandra.IntegrationTests.Core
             }
         }
 
-#if !NETCORE
+#if NET452
+
         [Test]
         [TestCassandraVersion(2, 0)]
         public void Query_Compression_LZ4_Test()
@@ -206,6 +211,7 @@ namespace Cassandra.IntegrationTests.Core
                 }
             }
         }
+
 #endif
 
         [Test]
@@ -297,9 +303,8 @@ namespace Cassandra.IntegrationTests.Core
                 }
                 catch (AggregateException)
                 {
-                    
                 }
-                Assert.True(taskList.All(t => 
+                Assert.True(taskList.All(t =>
                     t.Status == TaskStatus.RanToCompletion ||
                     (t.Exception != null && t.Exception.InnerException is ReadTimeoutException)), "Not all task completed");
             }
@@ -367,7 +372,7 @@ namespace Cassandra.IntegrationTests.Core
                     Assert.IsInstanceOf<SchemaChangeEventArgs>(eventArgs);
                     Assert.AreEqual(SchemaChangeEventArgs.Reason.Created, (eventArgs as SchemaChangeEventArgs).What);
                     Assert.AreEqual("test_events_kp", (eventArgs as SchemaChangeEventArgs).Keyspace);
-                    Assert.AreEqual("test_type", (eventArgs as SchemaChangeEventArgs).Type);   
+                    Assert.AreEqual("test_type", (eventArgs as SchemaChangeEventArgs).Type);
                 }
             }
         }
@@ -386,7 +391,6 @@ namespace Cassandra.IntegrationTests.Core
                         Query(connection, query).Wait();
                     }, TaskContinuationOptions.ExecuteSynchronously).Wait();
             }
-
         }
 
         [Test]
@@ -412,23 +416,28 @@ namespace Cassandra.IntegrationTests.Core
         }
 
         /// Tests that a ssl connection to a host with ssl disabled fails (not hangs)
-        /// 
+        ///
         /// @since 3.0.0
         /// @jira_ticket CSHARP-336
-        /// 
+        ///
         /// @test_category conection:ssl
         [Test]
         public void Ssl_Connect_With_Ssl_Disabled_Host()
         {
-            var config = new Configuration(Cassandra.Policies.DefaultPolicies, 
+            var config = new Configuration(Cassandra.Policies.DefaultPolicies,
                 new ProtocolOptions(ProtocolOptions.DefaultPort, new SSLOptions()),
                 new PoolingOptions(),
-                 new SocketOptions().SetConnectTimeoutMillis(200),
-                 new ClientOptions(),
-                 NoneAuthProvider.Instance,
-                 null,
-                 new QueryOptions(),
-                 new DefaultAddressTranslator());
+                new SocketOptions().SetConnectTimeoutMillis(200),
+                new ClientOptions(),
+                NoneAuthProvider.Instance,
+                null,
+                new QueryOptions(),
+                new DefaultAddressTranslator(),
+                new StartupOptionsFactory(),
+                new SessionFactoryBuilder(),
+                new Dictionary<string, IExecutionProfile>(),
+                new RequestOptionsMapper(),
+                null);
             using (var connection = CreateConnection(GetProtocolVersion(), config))
             {
                 var ex = Assert.Throws<AggregateException>(() => connection.Open().Wait(10000));
@@ -438,7 +447,7 @@ namespace Cassandra.IntegrationTests.Core
                     //So we throw a TimeoutException
                     StringAssert.IsMatch("SSL", ex.InnerException.Message);
                 }
-                else if (ex.InnerException is System.IO.IOException || 
+                else if (ex.InnerException is IOException ||
                          ex.InnerException.GetType().Name.Contains("Mono") ||
                          ex.InnerException is System.Security.Authentication.AuthenticationException)
                 {
@@ -452,7 +461,7 @@ namespace Cassandra.IntegrationTests.Core
                 }
             }
         }
-        
+
         [Test]
         public void SetKeyspace_Test()
         {
@@ -493,11 +502,11 @@ namespace Cassandra.IntegrationTests.Core
             // ReSharper disable AccessToDisposedClosure, AccessToModifiedClosure
             using (var connection = CreateConnection())
             {
-                await connection.Open();
+                await connection.Open().ConfigureAwait(false);
                 Assert.Null(connection.Keyspace);
-                await Query(connection, queryKs1);
-                await Query(connection, queryKs2);
-                await Task.Delay(100);
+                await Query(connection, queryKs1).ConfigureAwait(false);
+                await Query(connection, queryKs2).ConfigureAwait(false);
+                await Task.Delay(100).ConfigureAwait(false);
                 var counter = 0;
                 connection.WriteCompleted += () => Interlocked.Increment(ref counter);
                 TestHelper.ParallelInvoke(new Action[]
@@ -507,7 +516,7 @@ namespace Cassandra.IntegrationTests.Core
                     () => connection.SetKeyspace("system").Wait()
                 });
                 CollectionAssert.Contains(new[] { "ks_to_switch_p1", "ks_to_switch_p2", "system" }, connection.Keyspace);
-                await Task.Delay(200);
+                await Task.Delay(200).ConfigureAwait(false);
                 Assert.AreEqual(3, Volatile.Read(ref counter));
             }
             // ReSharper enable AccessToDisposedClosure, AccessToModifiedClosure
@@ -518,17 +527,17 @@ namespace Cassandra.IntegrationTests.Core
         {
             using (var connection = CreateConnection(null, null, new PoolingOptions().SetHeartBeatInterval(0)))
             {
-                await connection.Open();
+                await connection.Open().ConfigureAwait(false);
                 Assert.Null(connection.Keyspace);
                 var actions = new Action[100]
                     .Select<Action, Action>(_ => () => connection.SetKeyspace("system").Wait())
                     .ToArray();
-                await Task.Delay(100);
+                await Task.Delay(100).ConfigureAwait(false);
                 var counter = 0;
                 connection.WriteCompleted += () => Interlocked.Increment(ref counter);
                 TestHelper.ParallelInvoke(actions);
                 Assert.AreEqual("system", connection.Keyspace);
-                await Task.Delay(200);
+                await Task.Delay(200).ConfigureAwait(false);
                 Assert.AreEqual(1, Volatile.Read(ref counter));
             }
         }
@@ -613,15 +622,20 @@ namespace Cassandra.IntegrationTests.Core
             var socketOptions = new SocketOptions();
             socketOptions.SetConnectTimeoutMillis(1000);
             var config = new Configuration(
-                new Cassandra.Policies(), 
-                new ProtocolOptions(), 
-                new PoolingOptions(), 
-                socketOptions, 
-                new ClientOptions(), 
+                new Cassandra.Policies(),
+                new ProtocolOptions(),
+                new PoolingOptions(),
+                socketOptions,
+                new ClientOptions(),
                 NoneAuthProvider.Instance,
                 null,
                 new QueryOptions(),
-                new DefaultAddressTranslator());
+                new DefaultAddressTranslator(),
+                new StartupOptionsFactory(),
+                new SessionFactoryBuilder(),
+                new Dictionary<string, IExecutionProfile>(),
+                new RequestOptionsMapper(),
+                null);
             using (var connection = new Connection(new Serializer(GetProtocolVersion()), new IPEndPoint(new IPAddress(new byte[] { 1, 1, 1, 1 }), 9042), config))
             {
                 var ex = Assert.Throws<SocketException>(() => TaskHelper.WaitToComplete(connection.Open()));
@@ -637,7 +651,7 @@ namespace Cassandra.IntegrationTests.Core
         public async Task Connection_Close_Faults_AllPending_Tasks()
         {
             var connection = CreateConnection();
-            await connection.Open();
+            await connection.Open().ConfigureAwait(false);
             //Queue a lot of read and writes
             var taskList = new List<Task<Response>>();
             for (var i = 0; i < 1024; i++)
@@ -652,13 +666,13 @@ namespace Cassandra.IntegrationTests.Core
                     break;
                 }
                 //Wait until there is an operation in flight
-                await Task.Delay(30);
+                await Task.Delay(30).ConfigureAwait(false);
             }
             //Close the socket, this would trigger all pending ops to be called back
             connection.Dispose();
             try
             {
-                await Task.WhenAll(taskList.ToArray());
+                await Task.WhenAll(taskList.ToArray()).ConfigureAwait(false);
             }
             catch (SocketException)
             {
@@ -667,10 +681,10 @@ namespace Cassandra.IntegrationTests.Core
 
             Assert.True(!taskList.Any(t => t.Status != TaskStatus.RanToCompletion && t.Status != TaskStatus.Faulted), "Must be only completed and faulted task");
 
-            await Task.Delay(1000);
+            await Task.Delay(1000).ConfigureAwait(false);
 
             //A new call to write will be called back immediately with an exception
-            Assert.ThrowsAsync<SocketException>(async () => await Query(connection, "SELECT * FROM system.local"));
+            Assert.ThrowsAsync<SocketException>(async () => await Query(connection, "SELECT * FROM system.local").ConfigureAwait(false));
         }
 
         /// <summary>
@@ -690,34 +704,36 @@ namespace Cassandra.IntegrationTests.Core
         }
 
         [Test]
-        public void With_Heartbeat_Enabled_Should_Send_Request()
+        public async Task With_Heartbeat_Enabled_Should_Send_Request()
         {
-            using (var connection = CreateConnection(null, null, new PoolingOptions().SetHeartBeatInterval(500)))
+            using (var connection = CreateConnection(null, null, new PoolingOptions().SetHeartBeatInterval(80)))
             {
-                connection.Open().Wait();
-                //execute a dummy query
-                TaskHelper.WaitToComplete(Query(connection, "SELECT * FROM system.local", QueryProtocolOptions.Default));
-                Interlocked.MemoryBarrier();
+                await connection.Open().ConfigureAwait(false);
+                // Execute a dummy query
+                await Query(connection, "SELECT * FROM system.local", QueryProtocolOptions.Default)
+                    .ConfigureAwait(false);
+
                 var writeCounter = 0;
                 connection.WriteCompleted += () => Interlocked.Increment(ref writeCounter);
-                Thread.Sleep(2450);
-                Assert.GreaterOrEqual(Volatile.Read(ref writeCounter), 4);
+                await TestHelper.WaitUntilAsync(() => Volatile.Read(ref writeCounter) > 2, 200, 5).ConfigureAwait(false);
+                Assert.Greater(Volatile.Read(ref writeCounter), 2);
             }
         }
 
         [Test]
-        public void With_Heartbeat_Disabled_Should_Not_Send_Request()
+        public async Task With_Heartbeat_Disabled_Should_Not_Send_Request()
         {
             using (var connection = CreateConnection(null, null, new PoolingOptions().SetHeartBeatInterval(0)))
             {
-                connection.Open().Wait();
+                await connection.Open().ConfigureAwait(false);
                 //execute a dummy query
-                TaskHelper.WaitToComplete(Query(connection, "SELECT * FROM system.local", QueryProtocolOptions.Default));
-
-                Thread.Sleep(500);
+                await Query(connection, "SELECT * FROM system.local", QueryProtocolOptions.Default)
+                    .ConfigureAwait(false);
+                await Task.Delay(500).ConfigureAwait(false);
                 var writeCounter = 0;
                 connection.WriteCompleted += () => writeCounter++;
-                Thread.Sleep(2200);
+                // No write should occur
+                await Task.Delay(2200).ConfigureAwait(false);
                 Assert.AreEqual(0, writeCounter);
             }
         }
@@ -783,7 +799,7 @@ namespace Cassandra.IntegrationTests.Core
 
             using (var connection = CreateConnection())
             {
-                await connection.Open();
+                await connection.Open().ConfigureAwait(false);
                 var tasks = new List<Task>();
                 for (var i = 0; i < 100; i++)
                 {
@@ -792,12 +808,12 @@ namespace Cassandra.IntegrationTests.Core
 
                 Assert.That(connection.InFlight, Is.GreaterThan(5));
 
-                var thrownException = await TestHelper.EatUpException(connection.Send(requestMock.Object));
+                var thrownException = await TestHelper.EatUpException(connection.Send(requestMock.Object)).ConfigureAwait(false);
                 Assert.AreSame(ex, thrownException);
 
-                await Task.WhenAll(tasks);
+                await Task.WhenAll(tasks).ConfigureAwait(false);
 
-                await TestHelper.WaitUntilAsync(() => connection.InFlight == 0);
+                await TestHelper.WaitUntilAsync(() => connection.InFlight == 0).ConfigureAwait(false);
                 Assert.That(connection.InFlight, Is.Zero);
             }
         }
@@ -821,7 +837,12 @@ namespace Cassandra.IntegrationTests.Core
                 NoneAuthProvider.Instance,
                 null,
                 new QueryOptions(),
-                new DefaultAddressTranslator());
+                new DefaultAddressTranslator(),
+                new StartupOptionsFactory(),
+                new SessionFactoryBuilder(),
+                new Dictionary<string, IExecutionProfile>(),
+                new RequestOptionsMapper(),
+                null);
             return CreateConnection(GetProtocolVersion(), config);
         }
 

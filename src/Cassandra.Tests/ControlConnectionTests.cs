@@ -1,8 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Net;
+using Cassandra.Connections;
+using Cassandra.ExecutionProfiles;
+using Cassandra.ProtocolEvents;
+using Cassandra.Requests;
+using Cassandra.SessionManagement;
 using Moq;
+
 using NUnit.Framework;
 
 namespace Cassandra.Tests
@@ -14,10 +19,18 @@ namespace Cassandra.Tests
         {
             Diagnostics.CassandraTraceSwitch.Level = System.Diagnostics.TraceLevel.Info;
         }
+        
+        private IProtocolEventDebouncer GetEventDebouncer(Configuration config)
+        {
+            return new ProtocolEventDebouncer(
+                new TaskBasedTimerFactory(), 
+                TimeSpan.FromMilliseconds(config.MetadataSyncOptions.RefreshSchemaDelayIncrement), 
+                TimeSpan.FromMilliseconds(config.MetadataSyncOptions.MaxTotalRefreshSchemaDelay));
+        }
 
         private ControlConnection NewInstance(Configuration config, Metadata metadata)
         {
-            return new ControlConnection(ProtocolVersion.MaxSupported, config, metadata);
+            return new ControlConnection(GetEventDebouncer(config), ProtocolVersion.MaxSupported, config, metadata);
         }
 
         private ControlConnection NewInstance(Metadata metadata)
@@ -98,7 +111,8 @@ namespace Cassandra.Tests
                 .Returns<IPEndPoint>(e => e);
             const int portNumber = 9999;
             var metadata = new Metadata(new Configuration());
-            var config = new Configuration(Policies.DefaultPolicies,
+            var config = new Configuration(
+                Policies.DefaultPolicies,
                  new ProtocolOptions(portNumber),
                  null,
                  new SocketOptions(),
@@ -106,7 +120,12 @@ namespace Cassandra.Tests
                  NoneAuthProvider.Instance,
                  null,
                  new QueryOptions(),
-                 translatorMock.Object);
+                 translatorMock.Object,
+                 Mock.Of<IStartupOptionsFactory>(),
+                 new SessionFactoryBuilder(),
+                 new Dictionary<string, IExecutionProfile>(),
+                 new RequestOptionsMapper(),
+                 null);
             var cc = NewInstance(config, metadata);
             cc.Host = TestHelper.CreateHost("127.0.0.1");
             metadata.AddHost(cc.Host.Address);

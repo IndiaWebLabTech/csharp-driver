@@ -14,14 +14,21 @@ environment:
     - TARGET: net452
       CI_TYPE: UNIT
       PROJECT: Cassandra.Tests
-    - TARGET: netcoreapp1.0
+    - TARGET: netcoreapp2.0
+      CI_TYPE: UNIT
+      PROJECT: Cassandra.Tests
+    - TARGET: netcoreapp2.1
       CI_TYPE: UNIT
       PROJECT: Cassandra.Tests
     - TARGET: net452
       CASSANDRA_VERSION: 3.11.2
       CI_TYPE: INTEGRATION
       PROJECT: Cassandra.IntegrationTests
-    - TARGET: netcoreapp1.0
+    - TARGET: netcoreapp2.0
+      CASSANDRA_VERSION: 3.11.2
+      CI_TYPE: INTEGRATION
+      PROJECT: Cassandra.IntegrationTests
+    - TARGET: netcoreapp2.1
       CASSANDRA_VERSION: 3.11.2
       CI_TYPE: INTEGRATION
       PROJECT: Cassandra.IntegrationTests
@@ -38,12 +45,7 @@ build_script:
   - ps: dotnet build src\Cassandra.sln -c Release
 
 test_script:
-  - ps: dotnet test src\${env:PROJECT}\${env:PROJECT}.csproj -c Release -f $env:TARGET --filter "(TestCategory!=long)&(TestCategory!=memory)"  --logger "trx;LogFileName=..\..\..\TestResult.xml"
+  - ps: dotnet test src\${env:PROJECT}\${env:PROJECT}.csproj -c Release -f $env:TARGET --filter "(TestCategory!=long)&(TestCategory!=memory)" --logger:Appveyor
 on_failure:
   - ps: |
       Write-Host "Build failed"
-on_finish:
-  - ps: |
-      xml tr tools\trx-to-junit.xslt TestResult.xml > ResultsJUnit.xml
-      $wc = New-Object 'System.Net.WebClient'
-      $wc.UploadFile("https://ci.appveyor.com/api/testresults/junit/$($env:APPVEYOR_JOB_ID)", (Resolve-Path .\ResultsJUnit.xml))

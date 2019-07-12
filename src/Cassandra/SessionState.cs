@@ -1,5 +1,5 @@
 ﻿//
-//      Copyright (C) 2017 DataStax Inc.
+//      Copyright (C) DataStax Inc.
 //
 //   Licensed under the Apache License, Version 2.0 (the "License");
 //   you may not use this file except in compliance with the License.
@@ -17,6 +17,8 @@
 using System.Collections.Generic;
 using System.Text;
 using Cassandra.Collections;
+using Cassandra.Connections;
+using Cassandra.SessionManagement;
 
 namespace Cassandra
 {
@@ -62,10 +64,10 @@ namespace Cassandra
             return builder.ToString();
         }
 
-        internal static SessionState From(Session session)
+        internal static SessionState From(IInternalSession session)
         {
             var pools = session.GetPools();
-            var result = new Dictionary<Host, HostStateInfo>(pools.Length);
+            var result = new Dictionary<Host, HostStateInfo>();
             foreach (var kv in pools)
             {
                 var host = session.Cluster.GetHost(kv.Key);
@@ -89,7 +91,7 @@ namespace Cassandra
 
             public int InFlightQueries { get; }
             
-            public HostStateInfo(HostConnectionPool pool)
+            public HostStateInfo(IHostConnectionPool pool)
             {
                 OpenConnections = pool.OpenConnections;
                 InFlightQueries = pool.InFlight;

@@ -1,5 +1,5 @@
 //
-//      Copyright (C) 2012-2014 DataStax Inc.
+//      Copyright (C) DataStax Inc.
 //
 //   Licensed under the Apache License, Version 2.0 (the "License");
 //   you may not use this file except in compliance with the License.
@@ -68,22 +68,39 @@ namespace Cassandra
                 {
                     return _routingKey;
                 }
-                if (_routingValues == null)
-                {
-                    return null;
-                }
-                //Calculate the routing key based on Routing values
+
                 var serializer = Serializer;
                 if (serializer == null)
                 {
                     serializer = Serializer.Default;
-                    Logger.Warning("Calculating routing key before executing is not supporting for BatchStatements, " +
-                                   "using default serializer.");
+                    Logger.Warning(
+                        "Calculating routing key before executing is not supported for BatchStatement instances, " +
+                        "using default serializer.");
                 }
-                return RoutingKey.Compose(
-                    _routingValues
-                    .Select(value => new RoutingKey(serializer.Serialize(value)))
-                    .ToArray());
+
+                if (_routingValues != null)
+                {
+                    // Calculate the routing key based on Routing values
+                    return RoutingKey.Compose(
+                        _routingValues
+                            .Select(value => new RoutingKey(serializer.Serialize(value)))
+                            .ToArray());
+                }
+
+                var firstStatement = _queries.FirstOrDefault();
+                if (firstStatement == null)
+                {
+                    return null;
+                }
+
+                if (firstStatement is SimpleStatement simpleStatement)
+                {
+                    // Serializer must be set before obtaining the routing key for SimpleStatement instances.
+                    // For BoundStatement instances, it isn't needed.
+                    simpleStatement.Serializer = serializer;
+                }
+
+                return firstStatement.RoutingKey;
             }
         }
 

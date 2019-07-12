@@ -1,5 +1,5 @@
 //
-//      Copyright (C) 2012-2014 DataStax Inc.
+//      Copyright (C) DataStax Inc.
 //
 //   Licensed under the Apache License, Version 2.0 (the "License");
 //   you may not use this file except in compliance with the License.
@@ -16,8 +16,15 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using Cassandra.Connections;
+using Cassandra.ExecutionProfiles;
+using Cassandra.ProtocolEvents;
+using Cassandra.Requests;
 using Cassandra.Serialization;
+using Cassandra.SessionManagement;
 using Cassandra.Tasks;
+
 using Microsoft.IO;
 
 namespace Cassandra
@@ -30,121 +37,110 @@ namespace Cassandra
     /// </summary>
     public class Configuration
     {
-        private readonly IAuthInfoProvider _authInfoProvider;
-        private readonly IAuthProvider _authProvider;
-        private readonly ClientOptions _clientOptions;
-        private readonly Policies _policies;
-
-        private PoolingOptions _poolingOptions;
-        private readonly ProtocolOptions _protocolOptions;
-        private readonly QueryOptions _queryOptions;
-        private readonly SocketOptions _socketOptions;
-        private readonly IAddressTranslator _addressTranslator;
-        private readonly RecyclableMemoryStreamManager _bufferPool;
-        private readonly HashedWheelTimer _timer;
+        internal const string DefaultExecutionProfileName = "default";
 
         /// <summary>
         ///  Gets the policies set for the cluster.
         /// </summary>
-        public Policies Policies
-        {
-            get { return _policies; }
-        }
+        public Policies Policies { get; }
 
         /// <summary>
         ///  Gets the low-level tcp configuration options used (tcpNoDelay, keepAlive, ...).
         /// </summary>
-        public SocketOptions SocketOptions
-        {
-            get { return _socketOptions; }
-        }
+        public SocketOptions SocketOptions { get; private set; }
 
         /// <summary>
         ///  The Cassandra binary protocol level configuration (compression).
         /// </summary>
-        /// 
+        ///
         /// <returns>the protocol options.</returns>
-        public ProtocolOptions ProtocolOptions
-        {
-            get { return _protocolOptions; }
-        }
+        public ProtocolOptions ProtocolOptions { get; private set; }
 
         /// <summary>
         ///  The connection pooling configuration, defaults to null.
         /// </summary>
         /// <returns>the pooling options.</returns>
-        public PoolingOptions PoolingOptions
-        {
-            get { return _poolingOptions; }
-        }
+        public PoolingOptions PoolingOptions { get; private set; }
 
         /// <summary>
         ///  The .net client additional options configuration.
         /// </summary>
-        public ClientOptions ClientOptions
-        {
-            get { return _clientOptions; }
-        }
+        public ClientOptions ClientOptions { get; private set; }
 
         /// <summary>
         ///  The query configuration.
         /// </summary>
-        public QueryOptions QueryOptions
-        {
-            get { return _queryOptions; }
-        }
+        public QueryOptions QueryOptions { get; private set; }
 
         /// <summary>
         ///  The authentication provider used to connect to the Cassandra cluster.
         /// </summary>
-        /// 
         /// <returns>the authentication provider in use.</returns>
-        internal IAuthProvider AuthProvider
-            // Not exposed yet on purpose
-        {
-            get { return _authProvider; }
-        }
+        internal IAuthProvider AuthProvider { get; private set; } // Not exposed yet on purpose
 
         /// <summary>
         ///  The authentication provider used to connect to the Cassandra cluster.
         /// </summary>
-        /// 
         /// <returns>the authentication provider in use.</returns>
-        internal IAuthInfoProvider AuthInfoProvider
-            // Not exposed yet on purpose
-        {
-            get { return _authInfoProvider; }
-        }
+        internal IAuthInfoProvider AuthInfoProvider { get; private set; } // Not exposed yet on purpose
 
         /// <summary>
         ///  The address translator used to translate Cassandra node address.
-        /// </summary> 
+        /// </summary>
         /// <returns>the address translator in use.</returns>
-        public IAddressTranslator AddressTranslator
-        {
-            get { return _addressTranslator; }
-        }
+        public IAddressTranslator AddressTranslator { get; private set; }
+        
+        /// <summary>
+        /// Gets a read only key value map of execution profiles that were configured with
+        /// <see cref="Builder.WithExecutionProfiles"/>. The keys are execution profile names and the values
+        /// are <see cref="IExecutionProfile"/> instances.
+        /// </summary>
+        public IReadOnlyDictionary<string, IExecutionProfile> ExecutionProfiles { get; }
 
         /// <summary>
         /// Shared reusable timer
         /// </summary>
-        internal HashedWheelTimer Timer
-        {
-            get { return _timer; }
-        }
+        internal HashedWheelTimer Timer { get; private set; }
 
         /// <summary>
         /// Shared buffer pool
         /// </summary>
-        internal RecyclableMemoryStreamManager BufferPool
-        {
-            get { return _bufferPool; }
-        }
+        internal RecyclableMemoryStreamManager BufferPool { get; private set; }
 
         /// <summary>
         /// Gets or sets the list of <see cref="TypeSerializer{T}"/> defined.
         /// </summary>
         internal IEnumerable<ITypeSerializer> TypeSerializers { get; set; }
+
+        internal MetadataSyncOptions MetadataSyncOptions { get; }
+
+        internal IStartupOptionsFactory StartupOptionsFactory { get; }
+
+        internal ISessionFactoryBuilder<IInternalCluster, IInternalSession> SessionFactoryBuilder { get; }
+
+        internal IRequestOptionsMapper RequestOptionsMapper { get; }
+        
+        internal IRequestHandlerFactory RequestHandlerFactory { get; }
+
+        internal IHostConnectionPoolFactory HostConnectionPoolFactory { get; }
+
+        internal IRequestExecutionFactory RequestExecutionFactory { get; }
+
+        internal IConnectionFactory ConnectionFactory { get; }
+        
+        internal IControlConnectionFactory ControlConnectionFactory { get; }
+
+        internal IPrepareHandlerFactory PrepareHandlerFactory { get; }
+
+        internal ITimerFactory TimerFactory { get; }
+        
+        /// <summary>
+        /// The key is the execution profile name and the value is the IRequestOptions instance
+        /// built from the execution profile with that key.
+        /// </summary>
+        internal IReadOnlyDictionary<string, IRequestOptions> RequestOptions { get; }
+
+        internal IRequestOptions DefaultRequestOptions => RequestOptions[Configuration.DefaultExecutionProfileName];
 
         internal Configuration() :
             this(Policies.DefaultPolicies,
@@ -155,7 +151,12 @@ namespace Cassandra
                  NoneAuthProvider.Instance,
                  null,
                  new QueryOptions(),
-                 new DefaultAddressTranslator())
+                 new DefaultAddressTranslator(),
+                 new StartupOptionsFactory(),
+                 new SessionFactoryBuilder(),
+                 new Dictionary<string, IExecutionProfile>(),
+                 new RequestOptionsMapper(),
+                 null)
         {
         }
 
@@ -171,30 +172,63 @@ namespace Cassandra
                                IAuthProvider authProvider,
                                IAuthInfoProvider authInfoProvider,
                                QueryOptions queryOptions,
-                               IAddressTranslator addressTranslator)
+                               IAddressTranslator addressTranslator,
+                               IStartupOptionsFactory startupOptionsFactory,
+                               ISessionFactoryBuilder<IInternalCluster, IInternalSession> sessionFactoryBuilder,
+                               IReadOnlyDictionary<string, IExecutionProfile> executionProfiles,
+                               IRequestOptionsMapper requestOptionsMapper,
+                               MetadataSyncOptions metadataSyncOptions,
+                               IRequestHandlerFactory requestHandlerFactory = null,
+                               IHostConnectionPoolFactory hostConnectionPoolFactory = null,
+                               IRequestExecutionFactory requestExecutionFactory = null,
+                               IConnectionFactory connectionFactory = null,
+                               IControlConnectionFactory controlConnectionFactory = null,
+                               IPrepareHandlerFactory prepareHandlerFactory = null,
+                               ITimerFactory timerFactory = null)
         {
-            if (addressTranslator == null)
-            {
-                throw new ArgumentNullException("addressTranslator");
-            }
-            if (queryOptions == null)
-            {
-                throw new ArgumentNullException("queryOptions");
-            }
-            _policies = policies;
-            _protocolOptions = protocolOptions;
-            _poolingOptions = poolingOptions;
-            _socketOptions = socketOptions;
-            _clientOptions = clientOptions;
-            _authProvider = authProvider;
-            _authInfoProvider = authInfoProvider;
-            _queryOptions = queryOptions;
-            _addressTranslator = addressTranslator;
+            AddressTranslator = addressTranslator ?? throw new ArgumentNullException(nameof(addressTranslator));
+            QueryOptions = queryOptions ?? throw new ArgumentNullException(nameof(queryOptions));
+            Policies = policies;
+            ProtocolOptions = protocolOptions;
+            PoolingOptions = poolingOptions;
+            SocketOptions = socketOptions;
+            ClientOptions = clientOptions;
+            AuthProvider = authProvider;
+            AuthInfoProvider = authInfoProvider;
+            StartupOptionsFactory = startupOptionsFactory;
+            SessionFactoryBuilder = sessionFactoryBuilder;
+            RequestOptionsMapper = requestOptionsMapper;
+            MetadataSyncOptions = metadataSyncOptions?.Clone() ?? new MetadataSyncOptions();
+
+            RequestHandlerFactory = requestHandlerFactory ?? new RequestHandlerFactory();
+            HostConnectionPoolFactory = hostConnectionPoolFactory ?? new HostConnectionPoolFactory();
+            RequestExecutionFactory = requestExecutionFactory ?? new RequestExecutionFactory();
+            ConnectionFactory = connectionFactory ?? new ConnectionFactory();
+            ControlConnectionFactory = controlConnectionFactory ?? new ControlConnectionFactory();
+            PrepareHandlerFactory = prepareHandlerFactory ?? new PrepareHandlerFactory();
+            TimerFactory = timerFactory ?? new TaskBasedTimerFactory();
+            
+            RequestOptions = RequestOptionsMapper.BuildRequestOptionsDictionary(executionProfiles, policies, socketOptions, clientOptions, queryOptions);
+            ExecutionProfiles = BuildExecutionProfilesDictionary(executionProfiles, RequestOptions);
+
             // Create the buffer pool with 16KB for small buffers and 256Kb for large buffers.
             // The pool does not eagerly reserve the buffers, so it doesn't take unnecessary memory
             // to create the instance.
-            _bufferPool = new RecyclableMemoryStreamManager(16 * 1024, 256 * 1024, ProtocolOptions.MaximumFrameLength);
-            _timer = new HashedWheelTimer();
+            BufferPool = new RecyclableMemoryStreamManager(16 * 1024, 256 * 1024, ProtocolOptions.MaximumFrameLength);
+            Timer = new HashedWheelTimer();
+        }
+        
+        /// <summary>
+        /// Clones (shallow) the provided execution profile dictionary and add the default profile if not there yet.
+        /// </summary>
+        private IReadOnlyDictionary<string, IExecutionProfile> BuildExecutionProfilesDictionary(
+            IReadOnlyDictionary<string, IExecutionProfile> executionProfiles,
+            IReadOnlyDictionary<string, IRequestOptions> requestOptions)
+        {
+            var executionProfilesDictionary = executionProfiles.ToDictionary(profileKvp => profileKvp.Key, profileKvp => profileKvp.Value);
+            var defaultOptions = requestOptions[Configuration.DefaultExecutionProfileName];
+            executionProfilesDictionary[Configuration.DefaultExecutionProfileName] = new ExecutionProfile(defaultOptions);
+            return executionProfilesDictionary;
         }
 
         /// <summary>
@@ -202,12 +236,13 @@ namespace Cassandra
         /// </summary>
         internal PoolingOptions GetPoolingOptions(ProtocolVersion protocolVersion)
         {
-            if (_poolingOptions != null)
+            if (PoolingOptions != null)
             {
-                return _poolingOptions;
+                return PoolingOptions;
             }
-            _poolingOptions = PoolingOptions.Create(protocolVersion);
-            return _poolingOptions;
+
+            PoolingOptions = PoolingOptions.Create(protocolVersion);
+            return PoolingOptions;
         }
     }
 }
